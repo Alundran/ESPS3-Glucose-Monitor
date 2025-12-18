@@ -23,8 +23,8 @@ jobs:
       - name: Build firmware
         shell: bash
         run: |
-          idf.py set-target esp32s3
-          idf.py build
+          ${IDF_PATH}/tools/idf.py set-target esp32s3
+          ${IDF_PATH}/tools/idf.py build
       
       - name: Extract version from config.h
         id: get_version
