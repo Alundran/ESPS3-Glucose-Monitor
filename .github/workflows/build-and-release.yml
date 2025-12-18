@@ -1,0 +1,114 @@
+name: Build and Release Firmware
+
+on:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      
+      - name: Setup ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.1.2
+          target: esp32s3
+      
+      - name: Build firmware
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target esp32s3
+          idf.py build
+      
+      - name: Extract version from config.h
+        id: get_version
+        run: |
+          VERSION=$(grep '#define DEVICE_VERSION' main/config.h | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+      
+      - name: Check if release exists
+        id: check_release
+        run: |
+          TAG="v${{ steps.get_version.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release $TAG already exists, skipping..."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release $TAG does not exist, creating..."
+          fi
+      
+      - name: Rename binary
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          cp build/glucose-s3-idf.bin build/glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
+      
+      - name: Create Release
+        if: steps.check_release.outputs.exists == 'false'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          release_name: Firmware v${{ steps.get_version.outputs.version }}
+          body: |
+            ## Firmware Release v${{ steps.get_version.outputs.version }}
+            
+            ### Installation
+            1. Download the `.bin` file below
+            2. Flash to ESP32-S3-BOX-3 using ESP-IDF tools OR
+            3. Use OTA update via device web interface (Settings → Check for Updates)
+            
+            ### OTA Update
+            Devices will automatically detect this update on next boot and prompt for installation.
+            
+            **⚠️ WARNING**: Do NOT disconnect power during OTA update!
+            
+            ---
+            Built automatically from commit ${{ github.sha }}
+          draft: false
+          prerelease: false
+      
+      - name: Upload Release Asset
+        if: steps.check_release.outputs.exists == 'false'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
+          asset_name: glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
+          asset_content_type: application/octet-stream
+      
+      - name: Build Summary
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          echo "## ✅ Build and Release Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Binary:** glucose-monitor-v${{ steps.get_version.outputs.version }}.bin" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL:** ${{ steps.create_release.outputs.html_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Devices will detect this update automatically on next boot!" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Skip Summary
+        if: steps.check_release.outputs.exists == 'true'
+        run: |
+          echo "## ℹ️ Release Already Exists" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "A release with this version already exists. To create a new release:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Update DEVICE_VERSION in main/config.h" >> $GITHUB_STEP_SUMMARY
+          echo "2. Commit and push to master" >> $GITHUB_STEP_SUMMARY

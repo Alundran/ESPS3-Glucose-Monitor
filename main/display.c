@@ -520,3 +520,167 @@ void display_show_settings(display_button_callback_t reset_cb)
     
     ESP_LOGI(TAG, "Settings screen displayed");
 }
+
+// Static variables for OTA progress screen
+static lv_obj_t *ota_bar = NULL;
+static lv_obj_t *ota_percent_label = NULL;
+static lv_obj_t *ota_message_label = NULL;
+
+void display_show_ota_progress(int progress_percent, const char *message)
+{
+    display_lock();
+    
+    // Create screen on first call
+    if (ota_bar == NULL) {
+        lv_obj_t *screen = lv_obj_create(NULL);
+        lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+        lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+        
+        // Title
+        lv_obj_t *title = lv_label_create(screen);
+        lv_label_set_text(title, "Firmware Update");
+        lv_obj_set_style_text_color(title, lv_color_white(), 0);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
+        
+        // Warning text
+        lv_obj_t *warning = lv_label_create(screen);
+        lv_label_set_text(warning, "DO NOT DISCONNECT POWER!");
+        lv_obj_set_style_text_color(warning, lv_color_make(255, 100, 100), 0);
+        lv_obj_set_style_text_font(warning, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_align(warning, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(warning, LV_ALIGN_TOP_MID, 0, 60);
+        
+        // Progress bar
+        ota_bar = lv_bar_create(screen);
+        lv_obj_set_size(ota_bar, 260, 30);
+        lv_obj_set_style_bg_color(ota_bar, lv_color_make(40, 40, 40), 0);
+        lv_obj_set_style_bg_color(ota_bar, lv_color_make(0, 150, 255), LV_PART_INDICATOR);
+        lv_obj_align(ota_bar, LV_ALIGN_CENTER, 0, 0);
+        lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
+        
+        // Percentage label
+        ota_percent_label = lv_label_create(screen);
+        lv_label_set_text(ota_percent_label, "0%");
+        lv_obj_set_style_text_color(ota_percent_label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(ota_percent_label, &lv_font_montserrat_20, 0);
+        lv_obj_align(ota_percent_label, LV_ALIGN_CENTER, 0, 40);
+        
+        // Status message
+        ota_message_label = lv_label_create(screen);
+        lv_label_set_text(ota_message_label, "Initializing...");
+        lv_obj_set_style_text_color(ota_message_label, lv_color_make(200, 200, 200), 0);
+        lv_obj_set_style_text_font(ota_message_label, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_align(ota_message_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(ota_message_label, LV_ALIGN_BOTTOM_MID, 0, -40);
+        
+        lv_screen_load(screen);
+        current_screen = screen;
+    }
+    
+    // Update progress
+    if (ota_bar) {
+        lv_bar_set_value(ota_bar, progress_percent, LV_ANIM_ON);
+    }
+    
+    // Update percentage text
+    if (ota_percent_label) {
+        char percent_text[8];
+        snprintf(percent_text, sizeof(percent_text), "%d%%", progress_percent);
+        lv_label_set_text(ota_percent_label, percent_text);
+    }
+    
+    // Update message
+    if (ota_message_label && message) {
+        lv_label_set_text(ota_message_label, message);
+    }
+    
+    display_unlock();
+}
+
+void display_show_ota_warning(display_button_callback_t proceed_cb, display_button_callback_t cancel_cb)
+{
+    display_lock();
+    
+    static display_button_callback_t saved_proceed_cb = NULL;
+    static display_button_callback_t saved_cancel_cb = NULL;
+    saved_proceed_cb = proceed_cb;
+    saved_cancel_cb = cancel_cb;
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+    
+    // Title
+    lv_obj_t *title = lv_label_create(screen);
+    lv_label_set_text(title, "Firmware Update Available");
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
+    
+    // Warning box
+    lv_obj_t *warning_box = lv_obj_create(screen);
+    lv_obj_set_size(warning_box, 280, 120);
+    lv_obj_set_style_bg_color(warning_box, lv_color_make(60, 20, 20), 0);
+    lv_obj_set_style_border_color(warning_box, lv_color_make(255, 100, 100), 0);
+    lv_obj_set_style_border_width(warning_box, 2, 0);
+    lv_obj_align(warning_box, LV_ALIGN_CENTER, 0, -10);
+    
+    lv_obj_t *warning_text = lv_label_create(warning_box);
+    lv_label_set_text(warning_text, 
+        "WARNING!\n\n"
+        "Do NOT disconnect power\n"
+        "during the update process.\n"
+        "Device will reboot when\n"
+        "update is complete.");
+    lv_obj_set_style_text_color(warning_text, lv_color_white(), 0);
+    lv_obj_set_style_text_font(warning_text, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(warning_text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(warning_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(warning_text, 260);
+    lv_obj_center(warning_text);
+    
+    // Proceed button
+    static lv_obj_t *proceed_btn = NULL;
+    proceed_btn = lv_btn_create(screen);
+    lv_obj_set_size(proceed_btn, 130, 45);
+    lv_obj_align(proceed_btn, LV_ALIGN_BOTTOM_LEFT, 20, -20);
+    lv_obj_set_style_bg_color(proceed_btn, lv_color_make(0, 150, 0), 0);
+    
+    static void (*proceed_event_cb)(lv_event_t *) = NULL;
+    proceed_event_cb = [](lv_event_t *e) {
+        if (saved_proceed_cb) saved_proceed_cb();
+    };
+    lv_obj_add_event_cb(proceed_btn, proceed_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *proceed_label = lv_label_create(proceed_btn);
+    lv_label_set_text(proceed_label, "Update Now");
+    lv_obj_set_style_text_font(proceed_label, &lv_font_montserrat_16, 0);
+    lv_obj_center(proceed_label);
+    
+    // Cancel button
+    static lv_obj_t *cancel_btn = NULL;
+    cancel_btn = lv_btn_create(screen);
+    lv_obj_set_size(cancel_btn, 130, 45);
+    lv_obj_align(cancel_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
+    lv_obj_set_style_bg_color(cancel_btn, lv_color_make(100, 100, 100), 0);
+    
+    static void (*cancel_event_cb)(lv_event_t *) = NULL;
+    cancel_event_cb = [](lv_event_t *e) {
+        if (saved_cancel_cb) saved_cancel_cb();
+    };
+    lv_obj_add_event_cb(cancel_btn, cancel_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *cancel_label = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_label, "Later");
+    lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_16, 0);
+    lv_obj_center(cancel_label);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "OTA warning screen displayed");
+}

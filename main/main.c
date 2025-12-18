@@ -2,7 +2,7 @@
  * ESP32-S3-BOX-3 Glucose Monitor
  * 
  * Built by Spalding for the Supreme (Stephen Higgins)
- * Features: Display, WiFi provisioning, LibreLinkUp API
+ * Features: Display, WiFi provisioning, LibreLinkUp API, OTA Updates
  */
 
 #include <stdio.h>
@@ -18,6 +18,7 @@
 #include "libre_credentials.h"
 #include "global_settings.h"
 #include "ir_transmitter.h"
+#include "ota_update.h"
 #include "bsp/esp-bsp.h"
 #include "iot_button.h"
 
@@ -40,6 +41,10 @@ static void on_retry_button(void);
 static void on_restart_setup_button(void);
 static void on_reset_button(void);
 static void red_button_handler(void *arg, void *data);
+static void on_ota_proceed(void);
+static void on_ota_cancel(void);
+static void ota_progress_callback(int progress_percent, const char *message);
+static void check_for_ota_update(void);
 
 // Callbacks for WiFi events
 static void on_wifi_connected(void) {
@@ -191,6 +196,61 @@ static void on_reset_button(void) {
     esp_restart();
 }
 
+// OTA update callbacks
+static char new_ota_version[32] = {0};
+
+static void on_ota_proceed(void) {
+    ESP_LOGI(TAG, "User confirmed OTA update");
+    ota_perform_update(ota_progress_callback);
+}
+
+static void on_ota_cancel(void) {
+    ESP_LOGI(TAG, "User cancelled OTA update");
+    // Return to glucose display or appropriate screen
+    if (DEMO_MODE_ENABLED) {
+        display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
+                           librelinkup_get_trend_string(current_glucose.trend), 
+                           current_glucose.is_low, current_glucose.is_high);
+    } else if (libre_credentials_exist()) {
+        if (current_glucose.value_mmol > 0) {
+            display_show_glucose(current_glucose.value_mmol, 
+                               librelinkup_get_trend_string(current_glucose.trend), 
+                               current_glucose.is_low, current_glucose.is_high);
+        } else {
+            display_show_wifi_status("Loading glucose data...");
+        }
+    } else {
+        const char *ip = wifi_manager_get_ip();
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Go to http://%s to configure\nyour LibreLink credentials", ip);
+        display_show_wifi_status(msg);
+    }
+}
+
+static void ota_progress_callback(int progress_percent, const char *message) {
+    display_show_ota_progress(progress_percent, message);
+}
+
+static void check_for_ota_update(void) {
+    if (!wifi_manager_is_connected()) {
+        ESP_LOGW(TAG, "Skipping OTA check - WiFi not connected");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Checking for OTA updates on boot...");
+    esp_err_t ret = ota_check_for_update(new_ota_version, sizeof(new_ota_version));
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "OTA update available: %s -> %s", ota_get_current_version(), new_ota_version);
+        // Show warning dialog to user
+        display_show_ota_warning(on_ota_proceed, on_ota_cancel);
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        ESP_LOGI(TAG, "Already running latest firmware version");
+    } else {
+        ESP_LOGW(TAG, "Failed to check for OTA update: %s", esp_err_to_name(ret));
+    }
+}
+
 // Task to periodically fetch glucose data from LibreLinkUp
 static void glucose_fetch_task(void *pvParameters) {
 #if !DEMO_MODE_ENABLED
@@ -331,6 +391,10 @@ void app_main(void) {
     wifi_manager_register_failed_cb(on_wifi_failed);
     ESP_ERROR_CHECK(wifi_manager_init());
     
+    // Initialize OTA update system
+    ESP_LOGI(TAG, "Initializing OTA update system...");
+    ota_update_init();
+    
     // Initialize IR transmitter if Moon Lamp is enabled
     if (global_settings_is_moon_lamp_enabled()) {
         ESP_LOGI(TAG, "Initializing IR transmitter for Moon Lamp...");
@@ -357,6 +421,13 @@ void app_main(void) {
             vTaskDelay(pdMS_TO_TICKS(500));
             if (wifi_manager_is_connected()) {
                 ESP_LOGI(TAG, "Connected to WiFi successfully");
+                // Check for OTA updates on boot (non-blocking)
+                xTaskCreate([](void *pvParameters) {
+                    vTaskDelay(pdMS_TO_TICKS(5000));  // Wait 5s after boot
+                    check_for_ota_update();
+                    vTaskDelete(NULL);
+                }, "ota_check", 4096, NULL, 3, NULL);
+                
                 // Callback will handle display (show glucose directly)
                 return;
             }

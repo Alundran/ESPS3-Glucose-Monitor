@@ -74,4 +74,18 @@ void display_show_connection_failed(display_button_callback_t retry_cb, display_
  */
 void display_show_settings(display_button_callback_t reset_cb);
 
+/**
+ * Show OTA update progress screen
+ * @param progress_percent Progress percentage (0-100)
+ * @param message Status message
+ */
+void display_show_ota_progress(int progress_percent, const char *message);
+
+/**
+ * Show OTA update warning screen
+ * @param proceed_cb Callback when user confirms to proceed
+ * @param cancel_cb Callback when user cancels
+ */
+void display_show_ota_warning(display_button_callback_t proceed_cb, display_button_callback_t cancel_cb);
+
 #endif // DISPLAY_H

@@ -7,6 +7,7 @@
 #include "libre_credentials.h"
 #include "librelinkup.h"
 #include "global_settings.h"
+#include "ota_update.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -160,6 +161,7 @@ static const char* html_settings =
 "input,button,select{padding:12px;margin:8px;font-size:16px;width:80%;max-width:300px;border-radius:5px;border:none;display:block;margin-left:auto;margin-right:auto;box-sizing:border-box;}"
 "button{background:#4CAF50;color:white;cursor:pointer;}button:hover{background:#45a049;}"
 ".back{background:#666;margin-top:30px;}"
+".update-btn{background:#ff9800;}"
 ".form-row{max-width:300px;margin:15px auto;text-align:left;}"
 ".form-row label{display:block;margin-bottom:5px;color:#bbb;}"
 ".toggle-container{display:flex;align-items:center;justify-content:space-between;max-width:300px;margin:15px auto;padding:12px;background:#2a2a2a;border-radius:5px;}"
@@ -171,6 +173,7 @@ static const char* html_settings =
 "input:checked + .slider{background-color:#4CAF50;}"
 "input:checked + .slider:before{transform:translateX(26px);}"
 ".info{color:#888;font-size:12px;margin:5px auto;max-width:300px;text-align:left;}"
+"#updateMsg{margin:10px;color:#ff9800;min-height:20px;}"
 "</style>"
 "<script>"
 "function loadSettings(){"
@@ -180,6 +183,32 @@ static const char* html_settings =
 "      document.getElementById('moon_lamp').checked=d.moon_lamp;"
 "    }"
 "  }).catch(e=>console.error('Failed to load settings:',e));"
+"}"
+"function checkUpdate(){"
+"  const btn=document.getElementById('updateBtn');"
+"  const msg=document.getElementById('updateMsg');"
+"  btn.disabled=true;"
+"  btn.innerText='Checking...';"
+"  msg.innerText='Checking for updates...';"
+"  fetch('/ota/check').then(r=>r.json()).then(d=>{"
+"    if(d.updateAvailable){"
+"      msg.innerText='Update available: '+d.currentVersion+' → '+d.newVersion;"
+"      if(confirm('Update available! Current: '+d.currentVersion+', New: '+d.newVersion+'\\n\\nWARNING: Do NOT disconnect power during update!\\n\\nProceed?')){"
+"        msg.innerText='Starting update...';"
+"        fetch('/ota/update',{method:'POST'}).then(()=>{"
+"          msg.innerText='Update in progress... Device will reboot when complete.';"
+"        });"
+"      }else{"
+"        btn.disabled=false;btn.innerText='Check for Updates';"
+"      }"
+"    }else if(d.error){"
+"      msg.innerText='Error: '+d.error;"
+"      btn.disabled=false;btn.innerText='Check for Updates';"
+"    }else{"
+"      msg.innerText='Already running latest version: '+d.currentVersion;"
+"      btn.disabled=false;btn.innerText='Check for Updates';"
+"    }"
+"  }).catch(e=>{msg.innerText='Failed to check for updates';btn.disabled=false;btn.innerText='Check for Updates';});"
 "}"
 "window.onload=loadSettings;"
 "</script>"
@@ -201,6 +230,9 @@ static const char* html_settings =
 "</div>"
 "<div class='info' style='text-align:center;margin-top:5px;'>Control Moon Lamp via IR based on glucose levels</div>"
 "<button type='submit' style='margin-top:30px;'>Save Settings</button></form>"
+"<h2 style='text-align:center;'>Firmware Update</h2>"
+"<button id='updateBtn' class='update-btn' onclick='checkUpdate()'>Check for Updates</button>"
+"<div id='updateMsg'></div>"
 "<button class='back' onclick=\"location.href='/'\">Back to Menu</button></body></html>";
 
 static const char* success_page = 
@@ -651,6 +683,60 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// OTA check handler
+static esp_err_t ota_check_handler(httpd_req_t *req) {
+    char new_version[32] = {0};
+    esp_err_t ret = ota_check_for_update(new_version, sizeof(new_version));
+    
+    httpd_resp_set_type(req, "application/json");
+    
+    if (ret == ESP_OK) {
+        // Update available
+        char response[128];
+        snprintf(response, sizeof(response), 
+                "{\"updateAvailable\":true,\"currentVersion\":\"%s\",\"newVersion\":\"%s\"}", 
+                ota_get_current_version(), new_version);
+        httpd_resp_send(req, response, strlen(response));
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+        // Already latest
+        char response[128];
+        snprintf(response, sizeof(response), 
+                "{\"updateAvailable\":false,\"currentVersion\":\"%s\"}", 
+                ota_get_current_version());
+        httpd_resp_send(req, response, strlen(response));
+    } else {
+        // Error checking
+        const char *error_response = "{\"error\":\"Failed to check for updates\"}";
+        httpd_resp_send(req, error_response, strlen(error_response));
+    }
+    
+    return ESP_OK;
+}
+
+// OTA update handler (triggers the update process)
+static esp_err_t ota_update_handler(httpd_req_t *req) {
+    if (!ota_is_safe_to_update()) {
+        httpd_resp_set_type(req, "application/json");
+        const char *error_response = "{\"error\":\"Not safe to update - check WiFi and power\"}";
+        httpd_resp_send(req, error_response, strlen(error_response));
+        return ESP_OK;
+    }
+    
+    // Respond immediately before starting update
+    httpd_resp_set_type(req, "application/json");
+    const char *response = "{\"status\":\"Update started\"}";
+    httpd_resp_send(req, response, strlen(response));
+    
+    // Start OTA update in a separate task (so HTTP response completes)
+    xTaskCreate([](void *pvParameters) {
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for HTTP response
+        ota_perform_update(NULL);  // Progress callback handled by main.c via display
+        vTaskDelete(NULL);
+    }, "ota_task", 8192, NULL, 5, NULL);
+    
+    return ESP_OK;
+}
+
 // Captive portal redirect handler - serve portal page directly
 static esp_err_t redirect_handler(httpd_req_t *req) {
     // Apple devices need specific headers to trigger captive portal
@@ -700,7 +786,22 @@ static void start_webserver(void) {
             .method = HTTP_POST,
             .handler = save_post_handler
         };
-        httpd_register_uri_handler(server, &save);
+        httOTA update endpoints
+        httpd_uri_t ota_check = {
+            .uri = "/ota/check",
+            .method = HTTP_GET,
+            .handler = ota_check_handler
+        };
+        httpd_register_uri_handler(server, &ota_check);
+        
+        httpd_uri_t ota_update = {
+            .uri = "/ota/update",
+            .method = HTTP_POST,
+            .handler = ota_update_handler
+        };
+        httpd_register_uri_handler(server, &ota_update);
+        
+        // pd_register_uri_handler(server, &save);
         
         // WiFi scan endpoint
         httpd_uri_t scan = {
