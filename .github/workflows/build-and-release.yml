@@ -20,12 +20,6 @@ jobs:
           esp_idf_version: v5.1.2
           target: esp32s3
       
-      - name: Build firmware
-        shell: bash
-        run: |
-          ${IDF_PATH}/tools/idf.py set-target esp32s3
-          ${IDF_PATH}/tools/idf.py build
-      
       - name: Extract version from config.h
         id: get_version
         run: |
