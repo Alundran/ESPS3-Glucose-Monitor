@@ -78,7 +78,7 @@ esp_err_t ota_update_init(void) {
 esp_err_t ota_check_for_update(char *new_version, size_t new_version_size) {
     if (!wifi_manager_is_connected()) {
         ESP_LOGW(TAG, "Cannot check for updates - WiFi not connected");
-        return ESP_ERR_WIFI_NOT_CONNECT;
+        return ESP_FAIL;
     }
     
     ESP_LOGI(TAG, "Checking for firmware updates from GitHub...");

@@ -540,7 +540,7 @@ void display_show_ota_progress(int progress_percent, const char *message)
         lv_obj_t *title = lv_label_create(screen);
         lv_label_set_text(title, "Firmware Update");
         lv_obj_set_style_text_color(title, lv_color_white(), 0);
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
         lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
         
         // Warning text
@@ -563,14 +563,14 @@ void display_show_ota_progress(int progress_percent, const char *message)
         ota_percent_label = lv_label_create(screen);
         lv_label_set_text(ota_percent_label, "0%");
         lv_obj_set_style_text_color(ota_percent_label, lv_color_white(), 0);
-        lv_obj_set_style_text_font(ota_percent_label, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(ota_percent_label, &lv_font_montserrat_18, 0);
         lv_obj_align(ota_percent_label, LV_ALIGN_CENTER, 0, 40);
         
         // Status message
         ota_message_label = lv_label_create(screen);
         lv_label_set_text(ota_message_label, "Initializing...");
         lv_obj_set_style_text_color(ota_message_label, lv_color_make(200, 200, 200), 0);
-        lv_obj_set_style_text_font(ota_message_label, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(ota_message_label, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_align(ota_message_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(ota_message_label, LV_ALIGN_BOTTOM_MID, 0, -40);
         
@@ -598,12 +598,22 @@ void display_show_ota_progress(int progress_percent, const char *message)
     display_unlock();
 }
 
+// Static storage for OTA warning callbacks
+static display_button_callback_t saved_proceed_cb = NULL;
+static display_button_callback_t saved_cancel_cb = NULL;
+
+static void ota_warning_proceed_event(lv_event_t *e) {
+    if (saved_proceed_cb) saved_proceed_cb();
+}
+
+static void ota_warning_cancel_event(lv_event_t *e) {
+    if (saved_cancel_cb) saved_cancel_cb();
+}
+
 void display_show_ota_warning(display_button_callback_t proceed_cb, display_button_callback_t cancel_cb)
 {
     display_lock();
     
-    static display_button_callback_t saved_proceed_cb = NULL;
-    static display_button_callback_t saved_cancel_cb = NULL;
     saved_proceed_cb = proceed_cb;
     saved_cancel_cb = cancel_cb;
     
@@ -615,7 +625,7 @@ void display_show_ota_warning(display_button_callback_t proceed_cb, display_butt
     lv_obj_t *title = lv_label_create(screen);
     lv_label_set_text(title, "Firmware Update Available");
     lv_obj_set_style_text_color(title, lv_color_white(), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
     
@@ -647,16 +657,11 @@ void display_show_ota_warning(display_button_callback_t proceed_cb, display_butt
     lv_obj_set_size(proceed_btn, 130, 45);
     lv_obj_align(proceed_btn, LV_ALIGN_BOTTOM_LEFT, 20, -20);
     lv_obj_set_style_bg_color(proceed_btn, lv_color_make(0, 150, 0), 0);
-    
-    static void (*proceed_event_cb)(lv_event_t *) = NULL;
-    proceed_event_cb = [](lv_event_t *e) {
-        if (saved_proceed_cb) saved_proceed_cb();
-    };
-    lv_obj_add_event_cb(proceed_btn, proceed_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(proceed_btn, ota_warning_proceed_event, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t *proceed_label = lv_label_create(proceed_btn);
     lv_label_set_text(proceed_label, "Update Now");
-    lv_obj_set_style_text_font(proceed_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(proceed_label, &lv_font_montserrat_14, 0);
     lv_obj_center(proceed_label);
     
     // Cancel button
@@ -665,16 +670,11 @@ void display_show_ota_warning(display_button_callback_t proceed_cb, display_butt
     lv_obj_set_size(cancel_btn, 130, 45);
     lv_obj_align(cancel_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
     lv_obj_set_style_bg_color(cancel_btn, lv_color_make(100, 100, 100), 0);
-    
-    static void (*cancel_event_cb)(lv_event_t *) = NULL;
-    cancel_event_cb = [](lv_event_t *e) {
-        if (saved_cancel_cb) saved_cancel_cb();
-    };
-    lv_obj_add_event_cb(cancel_btn, cancel_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(cancel_btn, ota_warning_cancel_event, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t *cancel_label = lv_label_create(cancel_btn);
     lv_label_set_text(cancel_label, "Later");
-    lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_14, 0);
     lv_obj_center(cancel_label);
     
     lv_screen_load(screen);

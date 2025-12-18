@@ -231,6 +231,12 @@ static void ota_progress_callback(int progress_percent, const char *message) {
     display_show_ota_progress(progress_percent, message);
 }
 
+static void ota_check_task(void *pvParameters) {
+    vTaskDelay(pdMS_TO_TICKS(5000));  // Wait 5s after boot
+    check_for_ota_update();
+    vTaskDelete(NULL);
+}
+
 static void check_for_ota_update(void) {
     if (!wifi_manager_is_connected()) {
         ESP_LOGW(TAG, "Skipping OTA check - WiFi not connected");
@@ -422,11 +428,7 @@ void app_main(void) {
             if (wifi_manager_is_connected()) {
                 ESP_LOGI(TAG, "Connected to WiFi successfully");
                 // Check for OTA updates on boot (non-blocking)
-                xTaskCreate([](void *pvParameters) {
-                    vTaskDelay(pdMS_TO_TICKS(5000));  // Wait 5s after boot
-                    check_for_ota_update();
-                    vTaskDelete(NULL);
-                }, "ota_check", 4096, NULL, 3, NULL);
+                xTaskCreate(ota_check_task, "ota_check", 4096, NULL, 3, NULL);
                 
                 // Callback will handle display (show glucose directly)
                 return;

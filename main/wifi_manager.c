@@ -713,6 +713,9 @@ static esp_err_t ota_check_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Forward declaration
+static void ota_update_task(void *pvParameters);
+
 // OTA update handler (triggers the update process)
 static esp_err_t ota_update_handler(httpd_req_t *req) {
     if (!ota_is_safe_to_update()) {
@@ -728,13 +731,16 @@ static esp_err_t ota_update_handler(httpd_req_t *req) {
     httpd_resp_send(req, response, strlen(response));
     
     // Start OTA update in a separate task (so HTTP response completes)
-    xTaskCreate([](void *pvParameters) {
-        vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for HTTP response
-        ota_perform_update(NULL);  // Progress callback handled by main.c via display
-        vTaskDelete(NULL);
-    }, "ota_task", 8192, NULL, 5, NULL);
+    xTaskCreate(ota_update_task, "ota_task", 8192, NULL, 5, NULL);
     
     return ESP_OK;
+}
+
+// Task function for OTA update
+static void ota_update_task(void *pvParameters) {
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for HTTP response
+    ota_perform_update(NULL);  // Progress callback handled by main.c via display
+    vTaskDelete(NULL);
 }
 
 // Captive portal redirect handler - serve portal page directly
@@ -786,7 +792,9 @@ static void start_webserver(void) {
             .method = HTTP_POST,
             .handler = save_post_handler
         };
-        httOTA update endpoints
+        httpd_register_uri_handler(server, &save);
+        
+        // OTA update endpoints
         httpd_uri_t ota_check = {
             .uri = "/ota/check",
             .method = HTTP_GET,
