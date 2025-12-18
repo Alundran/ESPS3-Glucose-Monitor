@@ -1,0 +1,9 @@
+dependencies:
+  lvgl/lvgl:
+    version: "^9.2.0"
+  espressif/esp_jpeg:
+    version: "^1.0.0"
+  espressif/button:
+    version: "~3.2.0"
+  espressif/esp-box-3:
+    version: "^1.2.0"

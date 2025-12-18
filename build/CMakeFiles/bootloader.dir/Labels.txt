@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+C:/CodeProjects/glucose-s3-idf/build/CMakeFiles/bootloader
+C:/CodeProjects/glucose-s3-idf/build/CMakeFiles/bootloader.rule
+C:/CodeProjects/glucose-s3-idf/build/CMakeFiles/bootloader-complete.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+C:/CodeProjects/glucose-s3-idf/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
