@@ -7,6 +7,8 @@
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
 #include <string.h>
+#include <time.h>
+#include <math.h>
 
 // Embedded PNG image
 extern const uint8_t supreme_glucose_splash_png_start[] asm("_binary_supreme_glucose_splash_png_start");
@@ -20,6 +22,13 @@ static lv_obj_t *current_screen = NULL;
 // Setup screen elements for dynamic updates
 static lv_obj_t *setup_spinner = NULL;
 static lv_obj_t *setup_next_btn = NULL;
+
+// Triple tap detection for surprise screen
+static int tap_count = 0;
+static uint32_t last_tap_time = 0;
+
+// Moon phase indicator
+static lv_obj_t *moon_label = NULL;
 
 esp_err_t display_init(void)
 {
@@ -67,6 +76,70 @@ void display_lock(void)
 void display_unlock(void)
 {
     bsp_display_unlock();
+}
+
+// Calculate moon phase (0-7: new, waxing crescent, first quarter, waxing gibbous, full, waning gibbous, last quarter, waning crescent)
+static int calculate_moon_phase(void)
+{
+    // Get current time (days since epoch)
+    time_t now;
+    time(&now);
+    double days_since_new = fmod((now / 86400.0) - 10.0, 29.53);
+    int phase = (int)((days_since_new / 29.53) * 8.0);
+    return phase % 8;
+}
+
+static const char* get_moon_emoji(int phase)
+{
+    const char *moon_phases[] = {
+        "🌑",  // New moon
+        "🌒",  // Waxing crescent
+        "🌓",  // First quarter
+        "🌔",  // Waxing gibbous
+        "🌕",  // Full moon
+        "🌖",  // Waning gibbous
+        "🌗",  // Last quarter
+        "🌘"   // Waning crescent
+    };
+    return moon_phases[phase];
+}
+
+// Hidden surprise screen
+static void display_show_surprise(void)
+{
+    display_lock();
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_make(75, 0, 130), 0);  // Deep purple/indigo
+    
+    // Big "Surprise, bitch!" text
+    lv_obj_t *surprise_label = lv_label_create(screen);
+    lv_label_set_text(surprise_label, "Surprise,\nbitch!");
+    lv_obj_set_style_text_color(surprise_label, lv_color_make(255, 215, 0), 0);  // Gold text
+    lv_obj_set_style_text_font(surprise_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_align(surprise_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(surprise_label, LV_ALIGN_CENTER, 0, 0);
+    
+    // Witchy emoji/symbol
+    lv_obj_t *witch_label = lv_label_create(screen);
+    lv_label_set_text(witch_label, "✨🔮✨");
+    lv_obj_set_style_text_color(witch_label, lv_color_make(255, 215, 0), 0);
+    lv_obj_set_style_text_font(witch_label, &lv_font_montserrat_18, 0);
+    lv_obj_align(witch_label, LV_ALIGN_TOP_MID, 0, 20);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "🔮 Surprise screen activated!");
+    
+    // Auto-return to previous screen after 3 seconds
+    // For now, user will need to wait or interact to go back
 }
 
 void display_show_splash(void)
@@ -275,6 +348,28 @@ static void flash_timer_cb(lv_timer_t *timer) {
     }
 }
 
+// Tap event handler for surprise screen
+static void glucose_screen_tap_event(lv_event_t *e)
+{
+    uint32_t current_time = lv_tick_get();
+    
+    // Reset tap count if more than 1 second since last tap
+    if (current_time - last_tap_time > 1000) {
+        tap_count = 0;
+    }
+    
+    tap_count++;
+    last_tap_time = current_time;
+    
+    ESP_LOGI(TAG, "Screen tapped %d times", tap_count);
+    
+    // Show surprise screen on triple tap
+    if (tap_count >= 3) {
+        tap_count = 0;
+        display_show_surprise();
+    }
+}
+
 void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high)
 {
     display_lock();
@@ -363,6 +458,17 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     lv_obj_set_style_text_font(status_label, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);  // Center align text
     lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -20);
+    
+    // Moon phase indicator (top right)
+    moon_label = lv_label_create(screen);
+    int moon_phase = calculate_moon_phase();
+    lv_label_set_text(moon_label, get_moon_emoji(moon_phase));
+    lv_obj_set_style_text_color(moon_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(moon_label, &lv_font_montserrat_18, 0);
+    lv_obj_align(moon_label, LV_ALIGN_TOP_RIGHT, -10, 10);
+    
+    // Add tap event for surprise screen
+    lv_obj_add_event_cb(screen, glucose_screen_tap_event, LV_EVENT_CLICKED, NULL);
     
     lv_screen_load(screen);
     current_screen = screen;
