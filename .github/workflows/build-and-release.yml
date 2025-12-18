@@ -42,7 +42,7 @@ jobs:
       - name: Rename binary
         if: steps.check_release.outputs.exists == 'false'
         run: |
-          cp build/glucose-s3-idf.bin build/glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
+          cp build/glucose-s3.bin build/glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
       
       - name: Create Release
         if: steps.check_release.outputs.exists == 'false'
