@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
+#include <string.h>
 
 // Embedded PNG image
 extern const uint8_t supreme_glucose_splash_png_start[] asm("_binary_supreme_glucose_splash_png_start");
