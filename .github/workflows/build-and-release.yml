@@ -6,6 +6,9 @@ on:
       - master
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -47,41 +50,26 @@ jobs:
       
       - name: Create Release
         if: steps.check_release.outputs.exists == 'false'
-        id: create_release
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.get_version.outputs.version }}
-          release_name: Firmware v${{ steps.get_version.outputs.version }}
-          body: |
-            ## Firmware Release v${{ steps.get_version.outputs.version }}
-            
-            ### Installation
-            1. Download the `.bin` file below
-            2. Flash to ESP32-S3-BOX-3 using ESP-IDF tools OR
-            3. Use OTA update via device web interface (Settings → Check for Updates)
-            
-            ### OTA Update
-            Devices will automatically detect this update on next boot and prompt for installation.
-            
-            **⚠️ WARNING**: Do NOT disconnect power during OTA update!
-            
-            ---
-            Built automatically from commit ${{ github.sha }}
-          draft: false
-          prerelease: false
-      
-      - name: Upload Release Asset
-        if: steps.check_release.outputs.exists == 'false'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: build/glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
-          asset_name: glucose-monitor-v${{ steps.get_version.outputs.version }}.bin
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v${{ steps.get_version.outputs.version }} \
+            build/glucose-monitor-v${{ steps.get_version.outputs.version }}.bin \
+            --title "Firmware v${{ steps.get_version.outputs.version }}" \
+            --notes "## Firmware Release v${{ steps.get_version.outputs.version }}
+          
+          ### Installation
+          1. Download the \`.bin\` file below
+          2. Flash to ESP32-S3-BOX-3 using ESP-IDF tools OR
+          3. Use OTA update via device web interface (Settings → Check for Updates)
+          
+          ### OTA Update
+          Devices will automatically detect this update on next boot and prompt for installation.
+          
+          **⚠️ WARNING**: Do NOT disconnect power during OTA update!
+          
+          ---
+          Built automatically from commit ${{ github.sha }}"
       
       - name: Build Summary
         if: steps.check_release.outputs.exists == 'false'
@@ -90,7 +78,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Binary:** glucose-monitor-v${{ steps.get_version.outputs.version }}.bin" >> $GITHUB_STEP_SUMMARY
-          echo "**Release URL:** ${{ steps.create_release.outputs.html_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL:** https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Devices will detect this update automatically on next boot!" >> $GITHUB_STEP_SUMMARY
       
