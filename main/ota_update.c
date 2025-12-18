@@ -10,6 +10,7 @@
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_crt_bundle.h"
 #include "cJSON.h"
 #include <string.h>
 
@@ -94,6 +95,7 @@ esp_err_t ota_check_for_update(char *new_version, size_t new_version_size) {
         .event_handler = http_event_handler,
         .timeout_ms = 10000,
         .user_agent = "ESP32-Glucose-Monitor/1.0",
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
     
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -196,6 +198,7 @@ esp_err_t ota_perform_update(ota_progress_callback_t progress_cb) {
         .event_handler = http_event_handler,
         .timeout_ms = 10000,
         .user_agent = "ESP32-Glucose-Monitor/1.0",
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
     
     esp_http_client_handle_t api_client = esp_http_client_init(&api_config);
@@ -264,6 +267,7 @@ esp_err_t ota_perform_update(ota_progress_callback_t progress_cb) {
         .url = download_url,
         .timeout_ms = 30000,
         .keep_alive_enable = true,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
     
     esp_https_ota_config_t ota_https_config = {
