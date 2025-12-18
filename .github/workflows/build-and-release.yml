@@ -20,12 +20,6 @@ jobs:
           esp_idf_version: v5.1.2
           target: esp32s3
       
-      - name: Clean build directory
-        shell: bash
-        run: |
-          rm -rf build
-          rm -rf managed_components
-      
       - name: Build firmware
         shell: bash
         run: |
