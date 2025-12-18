@@ -28,7 +28,7 @@ dist/
 .DS_Store
 
 # Dependencies (uncomment if you want to track managed_components)
-# managed_components/
+managed_components/
 dependencies.lock
 
 # Logs
