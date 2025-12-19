@@ -799,6 +799,11 @@ void display_show_ota_progress(int progress_percent, const char *message)
 static display_button_callback_t saved_proceed_cb = NULL;
 static display_button_callback_t saved_cancel_cb = NULL;
 
+// Static storage for OTA warning screen elements
+static lv_obj_t *ota_warning_proceed_btn = NULL;
+static lv_obj_t *ota_warning_cancel_btn = NULL;
+static lv_obj_t *ota_warning_text = NULL;
+
 static void ota_warning_proceed_event(lv_event_t *e) {
     if (saved_proceed_cb) saved_proceed_cb();
 }
@@ -834,42 +839,40 @@ void display_show_ota_warning(display_button_callback_t proceed_cb, display_butt
     lv_obj_set_style_border_width(warning_box, 2, 0);
     lv_obj_align(warning_box, LV_ALIGN_CENTER, 0, -10);
     
-    lv_obj_t *warning_text = lv_label_create(warning_box);
-    lv_label_set_text(warning_text, 
+    ota_warning_text = lv_label_create(warning_box);
+    lv_label_set_text(ota_warning_text, 
         "WARNING!\n\n"
         "Do NOT disconnect power\n"
         "during the update process.\n"
         "Device will reboot when\n"
         "update is complete.");
-    lv_obj_set_style_text_color(warning_text, lv_color_white(), 0);
-    lv_obj_set_style_text_font(warning_text, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(warning_text, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(warning_text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(warning_text, 260);
-    lv_obj_center(warning_text);
+    lv_obj_set_style_text_color(ota_warning_text, lv_color_white(), 0);
+    lv_obj_set_style_text_font(ota_warning_text, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(ota_warning_text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(ota_warning_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(ota_warning_text, 260);
+    lv_obj_center(ota_warning_text);
     
     // Proceed button
-    static lv_obj_t *proceed_btn = NULL;
-    proceed_btn = lv_btn_create(screen);
-    lv_obj_set_size(proceed_btn, 130, 45);
-    lv_obj_align(proceed_btn, LV_ALIGN_BOTTOM_LEFT, 20, -20);
-    lv_obj_set_style_bg_color(proceed_btn, lv_color_make(0, 150, 0), 0);
-    lv_obj_add_event_cb(proceed_btn, ota_warning_proceed_event, LV_EVENT_CLICKED, NULL);
+    ota_warning_proceed_btn = lv_btn_create(screen);
+    lv_obj_set_size(ota_warning_proceed_btn, 130, 45);
+    lv_obj_align(ota_warning_proceed_btn, LV_ALIGN_BOTTOM_LEFT, 20, -20);
+    lv_obj_set_style_bg_color(ota_warning_proceed_btn, lv_color_make(0, 150, 0), 0);
+    lv_obj_add_event_cb(ota_warning_proceed_btn, ota_warning_proceed_event, LV_EVENT_CLICKED, NULL);
     
-    lv_obj_t *proceed_label = lv_label_create(proceed_btn);
+    lv_obj_t *proceed_label = lv_label_create(ota_warning_proceed_btn);
     lv_label_set_text(proceed_label, "Update Now");
     lv_obj_set_style_text_font(proceed_label, &lv_font_montserrat_14, 0);
     lv_obj_center(proceed_label);
     
     // Cancel button
-    static lv_obj_t *cancel_btn = NULL;
-    cancel_btn = lv_btn_create(screen);
-    lv_obj_set_size(cancel_btn, 130, 45);
-    lv_obj_align(cancel_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
-    lv_obj_set_style_bg_color(cancel_btn, lv_color_make(100, 100, 100), 0);
-    lv_obj_add_event_cb(cancel_btn, ota_warning_cancel_event, LV_EVENT_CLICKED, NULL);
+    ota_warning_cancel_btn = lv_btn_create(screen);
+    lv_obj_set_size(ota_warning_cancel_btn, 130, 45);
+    lv_obj_align(ota_warning_cancel_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
+    lv_obj_set_style_bg_color(ota_warning_cancel_btn, lv_color_make(100, 100, 100), 0);
+    lv_obj_add_event_cb(ota_warning_cancel_btn, ota_warning_cancel_event, LV_EVENT_CLICKED, NULL);
     
-    lv_obj_t *cancel_label = lv_label_create(cancel_btn);
+    lv_obj_t *cancel_label = lv_label_create(ota_warning_cancel_btn);
     lv_label_set_text(cancel_label, "Later");
     lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_14, 0);
     lv_obj_center(cancel_label);
@@ -880,4 +883,28 @@ void display_show_ota_warning(display_button_callback_t proceed_cb, display_butt
     display_unlock();
     
     ESP_LOGI(TAG, "OTA warning screen displayed");
+}
+
+void display_ota_warning_start_update(void)
+{
+    display_lock();
+    
+    // Delete the buttons
+    if (ota_warning_proceed_btn) {
+        lv_obj_del(ota_warning_proceed_btn);
+        ota_warning_proceed_btn = NULL;
+    }
+    if (ota_warning_cancel_btn) {
+        lv_obj_del(ota_warning_cancel_btn);
+        ota_warning_cancel_btn = NULL;
+    }
+    
+    // Update warning text to "Updating..."
+    if (ota_warning_text) {
+        lv_label_set_text(ota_warning_text, "Updating...\n\nPlease wait");
+    }
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "OTA warning transitioned to updating state");
 }

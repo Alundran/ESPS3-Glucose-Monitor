@@ -94,4 +94,10 @@ void display_show_ota_progress(int progress_percent, const char *message);
  */
 void display_show_ota_warning(display_button_callback_t proceed_cb, display_button_callback_t cancel_cb);
 
+/**
+ * Transition OTA warning screen to updating state
+ * Removes buttons and changes text to "Updating..."
+ */
+void display_ota_warning_start_update(void);
+
 #endif // DISPLAY_H
