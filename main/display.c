@@ -656,6 +656,54 @@ void display_show_settings(display_button_callback_t reset_cb)
     ESP_LOGI(TAG, "Settings screen displayed");
 }
 
+void display_show_librelink_qr(const char *ip)
+{
+    display_lock();
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    
+    // Title
+    lv_obj_t *title = lv_label_create(screen);
+    lv_label_set_text(title, "Setup LibreLink");
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    
+    // Generate URL
+    char url[128];
+    snprintf(url, sizeof(url), "http://%s/librelink", ip);
+    
+    // Create QR code
+    lv_obj_t *qr = lv_qrcode_create(screen);
+    lv_qrcode_set_size(qr, 160);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
+    
+    // Generate QR code data
+    lv_qrcode_update(qr, url, strlen(url));
+    lv_obj_center(qr);
+    
+    // Instruction text
+    lv_obj_t *instruction = lv_label_create(screen);
+    lv_label_set_text(instruction, "Scan QR code to configure\nyour LibreLink credentials");
+    lv_obj_set_style_text_color(instruction, lv_color_white(), 0);
+    lv_obj_set_style_text_font(instruction, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(instruction, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(instruction, LV_ALIGN_BOTTOM_MID, 0, -10);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "LibreLink QR code screen displayed: %s", url);
+}
+
 // Static variables for OTA progress screen
 static lv_obj_t *ota_bar = NULL;
 static lv_obj_t *ota_percent_label = NULL;

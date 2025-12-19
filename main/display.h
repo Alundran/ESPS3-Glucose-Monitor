@@ -75,6 +75,12 @@ void display_show_connection_failed(display_button_callback_t retry_cb, display_
 void display_show_settings(display_button_callback_t reset_cb);
 
 /**
+ * Show LibreLink setup screen with QR code
+ * @param ip IP address of the device
+ */
+void display_show_librelink_qr(const char *ip);
+
+/**
  * Show OTA update progress screen
  * @param progress_percent Progress percentage (0-100)
  * @param message Status message

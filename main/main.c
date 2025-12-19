@@ -65,10 +65,8 @@ static void on_wifi_connected(void) {
             // Real credentials - show loading message while fetching
             display_show_wifi_status("Loading glucose data...");
         } else {
-            // No LibreLink credentials - show message
-            char msg[128];
-            snprintf(msg, sizeof(msg), "Go to http://%s to configure\nyour LibreLink credentials", ip);
-            display_show_wifi_status(msg);
+            // No LibreLink credentials - show QR code
+            display_show_librelink_qr(ip);
         }
     }
 }
@@ -136,9 +134,7 @@ static void on_setup_next_button(void) {
         } else {
             // No credentials - show setup message
             const char *ip = wifi_manager_get_ip();
-            char msg[128];
-            snprintf(msg, sizeof(msg), "Go to http://%s to configure\nyour LibreLink credentials", ip);
-            display_show_wifi_status(msg);
+            display_show_librelink_qr(ip);
         }
     } else {
         ESP_LOGI(TAG, "WiFi not connected yet, please wait...");
@@ -175,9 +171,7 @@ static void red_button_handler(void *arg, void *data) {
             }
         } else {
             const char *ip = wifi_manager_get_ip();
-            char msg[128];
-            snprintf(msg, sizeof(msg), "Go to http://%s to configure\nyour LibreLink credentials", ip);
-            display_show_wifi_status(msg);
+            display_show_librelink_qr(ip);
         }
     } else {
         // Show settings
@@ -224,9 +218,7 @@ static void on_ota_cancel(void) {
         }
     } else {
         const char *ip = wifi_manager_get_ip();
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Go to http://%s to configure\nyour LibreLink credentials", ip);
-        display_show_wifi_status(msg);
+        display_show_librelink_qr(ip);
     }
 }
 
