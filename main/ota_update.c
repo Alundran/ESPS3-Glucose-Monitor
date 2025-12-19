@@ -262,12 +262,14 @@ esp_err_t ota_perform_update(ota_progress_callback_t progress_cb) {
         progress_cb(5, "Starting download...");
     }
     
-    // Configure OTA
+    // Configure OTA with larger buffer for firmware download
     esp_http_client_config_t ota_config = {
         .url = download_url,
         .timeout_ms = 30000,
         .keep_alive_enable = true,
         .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 4096,
+        .buffer_size_tx = 2048,
     };
     
     esp_https_ota_config_t ota_https_config = {

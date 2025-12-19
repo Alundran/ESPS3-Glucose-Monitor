@@ -201,6 +201,9 @@ static char new_ota_version[32] = {0};
 
 static void on_ota_proceed(void) {
     ESP_LOGI(TAG, "User confirmed OTA update");
+    // Show progress screen immediately
+    display_show_ota_progress(0, "Preparing update...");
+    // Start the update (this will call ota_progress_callback with updates)
     ota_perform_update(ota_progress_callback);
 }
 
