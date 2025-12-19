@@ -197,6 +197,8 @@ static void on_ota_proceed(void) {
     ESP_LOGI(TAG, "User confirmed OTA update");
     // Show progress screen immediately
     display_show_ota_progress(0, "Preparing update...");
+    // Give LVGL time to render the screen before blocking OTA operation
+    vTaskDelay(pdMS_TO_TICKS(100));
     // Start the update (this will call ota_progress_callback with updates)
     ota_perform_update(ota_progress_callback);
 }

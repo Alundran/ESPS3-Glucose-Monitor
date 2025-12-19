@@ -98,14 +98,14 @@ static int calculate_moon_phase(void)
 static const char* get_moon_emoji(int phase)
 {
     const char *moon_phases[] = {
-        "🌑",  // New moon
-        "🌒",  // Waxing crescent
-        "🌓",  // First quarter
-        "🌔",  // Waxing gibbous
-        "🌕",  // Full moon
-        "🌖",  // Waning gibbous
-        "🌗",  // Last quarter
-        "🌘"   // Waning crescent
+        "\xE2\x97\x8F",  // ● New moon (filled circle)
+        ")",             // Waxing crescent
+        "D",             // First quarter
+        "(",             // Waxing gibbous
+        "O",             // Full moon (letter O)
+        ")",             // Waning gibbous
+        "C",             // Last quarter
+        "("              // Waning crescent
     };
     return moon_phases[phase];
 }
@@ -140,7 +140,7 @@ static void display_show_surprise(void)
     
     // Witchy emoji/symbol
     lv_obj_t *witch_label = lv_label_create(screen);
-    lv_label_set_text(witch_label, "✨🔮✨");
+    lv_label_set_text(witch_label, "* * *");  // Stars instead of emojis
     lv_obj_set_style_text_color(witch_label, lv_color_make(255, 215, 0), 0);
     lv_obj_set_style_text_font(witch_label, &lv_font_montserrat_18, 0);
     lv_obj_align(witch_label, LV_ALIGN_TOP_MID, 0, 20);
@@ -485,7 +485,21 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     lv_obj_set_style_text_color(status_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(status_label, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);  // Center align text
-    lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -35);
+    
+    // Timestamp below status
+    lv_obj_t *timestamp_label = lv_label_create(screen);
+    char timestamp_text[64];
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    strftime(timestamp_text, sizeof(timestamp_text), "Last updated %d/%m/%Y %H:%M", &timeinfo);
+    lv_label_set_text(timestamp_label, timestamp_text);
+    lv_obj_set_style_text_color(timestamp_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(timestamp_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(timestamp_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(timestamp_label, LV_ALIGN_BOTTOM_MID, 0, -15);
     
     // Moon phase indicator (top right)
     moon_label = lv_label_create(screen);
