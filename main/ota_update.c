@@ -17,7 +17,7 @@
 static const char *TAG = "OTA_UPDATE";
 
 // Buffer for GitHub API response
-#define MAX_HTTP_RECV_BUFFER 4096
+#define MAX_HTTP_RECV_BUFFER 8192
 static char http_recv_buffer[MAX_HTTP_RECV_BUFFER];
 static int http_recv_len = 0;
 

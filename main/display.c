@@ -30,6 +30,12 @@ static uint32_t last_tap_time = 0;
 // Moon phase indicator
 static lv_obj_t *moon_label = NULL;
 
+// Last glucose values for restoring screen after surprise
+static float last_glucose_mmol = 0.0f;
+static char last_trend[8] = "*";
+static bool last_is_low = false;
+static bool last_is_high = false;
+
 esp_err_t display_init(void)
 {
     ESP_LOGI(TAG, "Initializing display with BSP...");
@@ -104,6 +110,14 @@ static const char* get_moon_emoji(int phase)
     return moon_phases[phase];
 }
 
+// Tap event to dismiss surprise screen
+static void surprise_screen_tap_event(lv_event_t *e)
+{
+    ESP_LOGI(TAG, "Surprise screen dismissed");
+    // Restore the last glucose screen
+    display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high);
+}
+
 // Hidden surprise screen
 static void display_show_surprise(void)
 {
@@ -131,15 +145,22 @@ static void display_show_surprise(void)
     lv_obj_set_style_text_font(witch_label, &lv_font_montserrat_18, 0);
     lv_obj_align(witch_label, LV_ALIGN_TOP_MID, 0, 20);
     
+    // Tap instruction at bottom
+    lv_obj_t *tap_hint = lv_label_create(screen);
+    lv_label_set_text(tap_hint, "Tap to dismiss");
+    lv_obj_set_style_text_color(tap_hint, lv_color_make(255, 215, 0), 0);
+    lv_obj_set_style_text_font(tap_hint, &lv_font_montserrat_14, 0);
+    lv_obj_align(tap_hint, LV_ALIGN_BOTTOM_MID, 0, -20);
+    
+    // Add tap event to dismiss
+    lv_obj_add_event_cb(screen, surprise_screen_tap_event, LV_EVENT_CLICKED, NULL);
+    
     lv_screen_load(screen);
     current_screen = screen;
     
     display_unlock();
     
     ESP_LOGI(TAG, "🔮 Surprise screen activated!");
-    
-    // Auto-return to previous screen after 3 seconds
-    // For now, user will need to wait or interact to go back
 }
 
 void display_show_splash(void)
@@ -372,6 +393,13 @@ static void glucose_screen_tap_event(lv_event_t *e)
 
 void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high)
 {
+    // Store values for restoring after surprise screen
+    last_glucose_mmol = glucose_mmol;
+    strncpy(last_trend, trend, sizeof(last_trend) - 1);
+    last_trend[sizeof(last_trend) - 1] = '\0';
+    last_is_low = is_low;
+    last_is_high = is_high;
+    
     display_lock();
     
     // Stop any existing flash timer
