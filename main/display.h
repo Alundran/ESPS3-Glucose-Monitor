@@ -37,7 +37,7 @@ void display_show_wifi_status(const char *message);
  * @param is_low True if glucose is low (<70)
  * @param is_high True if glucose is high (>180)
  */
-void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high);
+void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high, const char *timestamp);
 
 /**
  * Button callback function type

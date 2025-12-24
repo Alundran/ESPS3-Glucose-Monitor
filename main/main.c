@@ -28,6 +28,7 @@ static const char *TAG = "GLUCOSE_MONITOR";
 static bool wifi_ready = false;
 static bool setup_in_progress = false;
 static bool settings_shown = false;
+static bool ota_check_complete = false;
 
 // LibreLink/Glucose tracking
 static bool libre_logged_in = false;
@@ -60,7 +61,7 @@ static void on_wifi_connected(void) {
         // Check if LibreLink credentials exist OR demo mode is enabled
         if (DEMO_MODE_ENABLED) {
             // Demo mode - show demo glucose reading
-            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH);
+            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH, "Demo Mode");
         } else if (libre_credentials_exist()) {
             // Real credentials - show loading message while fetching
             display_show_wifi_status("Loading glucose data...");
@@ -127,7 +128,7 @@ static void on_setup_next_button(void) {
         vTaskDelay(pdMS_TO_TICKS(2000));
         if (DEMO_MODE_ENABLED) {
             // Demo mode - show demo glucose
-            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH);
+            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH, "Demo Mode");
         } else if (libre_credentials_exist()) {
             // Real credentials - show loading message
             display_show_wifi_status("Loading glucose data...");
@@ -159,13 +160,15 @@ static void red_button_handler(void *arg, void *data) {
             // Demo mode - show demo glucose
             display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
                                librelinkup_get_trend_string(current_glucose.trend), 
-                               current_glucose.is_low, current_glucose.is_high);
+                               current_glucose.is_low, current_glucose.is_high,
+                               current_glucose.timestamp);
         } else if (libre_credentials_exist()) {
             // Real credentials - show current glucose if we have it, otherwise loading
             if (current_glucose.value_mmol > 0) {
                 display_show_glucose(current_glucose.value_mmol, 
                                    librelinkup_get_trend_string(current_glucose.trend), 
-                                   current_glucose.is_low, current_glucose.is_high);
+                                   current_glucose.is_low, current_glucose.is_high,
+                                   current_glucose.timestamp);
             } else {
                 display_show_wifi_status("Loading glucose data...");
             }
@@ -197,8 +200,8 @@ static void on_ota_proceed(void) {
     ESP_LOGI(TAG, "User confirmed OTA update");
     // Transition the warning screen to "Updating..." immediately
     display_ota_warning_start_update();
-    // Give LVGL time to render the changes
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Give extra time for display to fully render
+    vTaskDelay(pdMS_TO_TICKS(200));
     // Start the update (this will call ota_progress_callback with updates)
     ota_perform_update(ota_progress_callback);
 }
@@ -209,12 +212,14 @@ static void on_ota_cancel(void) {
     if (DEMO_MODE_ENABLED) {
         display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
                            librelinkup_get_trend_string(current_glucose.trend), 
-                           current_glucose.is_low, current_glucose.is_high);
+                           current_glucose.is_low, current_glucose.is_high,
+                           current_glucose.timestamp);
     } else if (libre_credentials_exist()) {
         if (current_glucose.value_mmol > 0) {
             display_show_glucose(current_glucose.value_mmol, 
                                librelinkup_get_trend_string(current_glucose.trend), 
-                               current_glucose.is_low, current_glucose.is_high);
+                               current_glucose.is_low, current_glucose.is_high,
+                               current_glucose.timestamp);
         } else {
             display_show_wifi_status("Loading glucose data...");
         }
@@ -252,6 +257,9 @@ static void check_for_ota_update(void) {
     } else {
         ESP_LOGW(TAG, "Failed to check for OTA update: %s", esp_err_to_name(ret));
     }
+    
+    // Signal that OTA check is complete so glucose fetch can proceed
+    ota_check_complete = true;
 }
 
 // Task to periodically fetch glucose data from LibreLinkUp
@@ -262,11 +270,23 @@ static void glucose_fetch_task(void *pvParameters) {
     bool use_eu_server = false;
 #endif
     
+    bool first_fetch = true;
+    
     while (1) {
-        // Wait configured interval between updates (load from settings each time)
-        uint32_t interval_ms = global_settings_get_interval_ms();
-        ESP_LOGI(TAG, "Next glucose update in %lu minutes", interval_ms / 60000);
-        vTaskDelay(pdMS_TO_TICKS(interval_ms));
+        // On first iteration, wait for OTA check to complete, then fetch immediately
+        if (first_fetch) {
+            // Wait for OTA check to complete before first glucose fetch
+            while (!ota_check_complete) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+            ESP_LOGI(TAG, "OTA check complete, proceeding with glucose fetch");
+        } else {
+            // Subsequent iterations wait for the configured interval
+            uint32_t interval_ms = global_settings_get_interval_ms();
+            ESP_LOGI(TAG, "Next glucose update in %lu minutes", interval_ms / 60000);
+            vTaskDelay(pdMS_TO_TICKS(interval_ms));
+        }
+        first_fetch = false;
         
         // Only fetch if WiFi is connected and (credentials exist OR demo mode)
         if (!wifi_ready || (!libre_credentials_exist() && !DEMO_MODE_ENABLED)) {
@@ -285,8 +305,26 @@ static void glucose_fetch_task(void *pvParameters) {
                 ESP_LOGI(TAG, "Loading LibreLink credentials...");
                 librelinkup_init(use_eu_server);
                 
-                if (librelinkup_login(email, password) == ESP_OK) {
-                    ESP_LOGI(TAG, "LibreLink login successful");
+                // Only login if we don't already have a valid token from NVS
+                if (!librelinkup_is_logged_in()) {
+                    if (librelinkup_login(email, password) == ESP_OK) {
+                        ESP_LOGI(TAG, "LibreLink login successful");
+                        libre_logged_in = true;
+                        
+                        // If no patient ID stored, get it now
+                        if (libre_patient_id[0] == '\0') {
+                            if (librelinkup_get_patient_id(libre_patient_id, sizeof(libre_patient_id)) == ESP_OK) {
+                                ESP_LOGI(TAG, "Got patient ID: %s", libre_patient_id);
+                                // Save it for next time
+                                libre_credentials_save(email, password, libre_patient_id, use_eu_server);
+                            }
+                        }
+                    } else {
+                        ESP_LOGE(TAG, "LibreLink login failed");
+                        continue;
+                    }
+                } else {
+                    ESP_LOGI(TAG, "Using existing auth token from NVS");
                     libre_logged_in = true;
                     
                     // If no patient ID stored, get it now
@@ -297,9 +335,6 @@ static void glucose_fetch_task(void *pvParameters) {
                             libre_credentials_save(email, password, libre_patient_id, use_eu_server);
                         }
                     }
-                } else {
-                    ESP_LOGE(TAG, "LibreLink login failed");
-                    continue;
                 }
             }
 #endif
@@ -308,7 +343,8 @@ static void glucose_fetch_task(void *pvParameters) {
         // Fetch glucose data
         if (libre_logged_in && libre_patient_id[0] != '\0') {
             ESP_LOGI(TAG, "Fetching glucose data...");
-            if (librelinkup_get_glucose(libre_patient_id, &current_glucose) == ESP_OK) {
+            esp_err_t err = librelinkup_get_glucose(libre_patient_id, &current_glucose);
+            if (err == ESP_OK) {
                 ESP_LOGI(TAG, "Glucose: %d mg/dL, Trend: %s", 
                         current_glucose.value_mgdl, 
                         librelinkup_get_trend_string(current_glucose.trend));
@@ -317,11 +353,18 @@ static void glucose_fetch_task(void *pvParameters) {
                 if (!settings_shown && !setup_in_progress) {
                     display_show_glucose(current_glucose.value_mmol, 
                                        librelinkup_get_trend_string(current_glucose.trend),
-                                       current_glucose.is_low, current_glucose.is_high);
+                                       current_glucose.is_low, current_glucose.is_high,
+                                       current_glucose.timestamp);
                 }
+            } else if (err == ESP_ERR_LIBRE_AUTH_FAILED) {
+                // Only force re-login on actual authentication failures (401)
+                ESP_LOGE(TAG, "Authentication failed - forcing re-login");
+                libre_logged_in = false;
+            } else if (err == ESP_ERR_LIBRE_RATE_LIMITED) {
+                // Rate limited - just log and wait, don't re-login!
+                ESP_LOGW(TAG, "Rate limited - will retry on next cycle");
             } else {
                 ESP_LOGE(TAG, "Failed to fetch glucose data");
-                libre_logged_in = false;  // Force re-login next time
             }
         }
     }
@@ -439,11 +482,15 @@ void app_main(void) {
         // Connection failed - show connection failed screen
         ESP_LOGE(TAG, "WiFi connection timeout - no IP address received");
         display_show_connection_failed(on_retry_button, on_restart_setup_button);
+        // Signal OTA check complete (won't run without WiFi)
+        ota_check_complete = true;
         // Don't return - let the task continue running
     } else {
         // No credentials - AP mode already started, show About screen
         ESP_LOGI(TAG, "No WiFi credentials, AP mode active, showing About screen");
         display_show_about(on_about_next_button);
+        // Signal OTA check complete (won't run without WiFi)
+        ota_check_complete = true;
     }
     
     ESP_LOGI(TAG, "Initialization complete");

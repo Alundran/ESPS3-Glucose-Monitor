@@ -6,15 +6,27 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
+#include "esp_codec_dev.h"
+#include "driver/gpio.h"
 #include <string.h>
 #include <time.h>
 #include <math.h>
+
+// Speaker power amplifier GPIO (GPIO 46)
+#define SPEAKER_PWR_GPIO GPIO_NUM_46
 
 // Embedded PNG image
 extern const uint8_t supreme_glucose_splash_png_start[] asm("_binary_supreme_glucose_splash_png_start");
 extern const uint8_t supreme_glucose_splash_png_end[] asm("_binary_supreme_glucose_splash_png_end");
 
+// Embedded WAV audio file
+extern const uint8_t ahs_lala_wav_start[] asm("_binary_ahs_lala_wav_start");
+extern const uint8_t ahs_lala_wav_end[] asm("_binary_ahs_lala_wav_end");
+
 static const char *TAG = "DISPLAY";
+
+// Audio codec handle for speaker
+static esp_codec_dev_handle_t spk_codec_dev = NULL;
 
 // Current screen tracking
 static lv_obj_t *current_screen = NULL;
@@ -27,14 +39,12 @@ static lv_obj_t *setup_next_btn = NULL;
 static int tap_count = 0;
 static uint32_t last_tap_time = 0;
 
-// Moon phase indicator
-static lv_obj_t *moon_label = NULL;
-
 // Last glucose values for restoring screen after surprise
 static float last_glucose_mmol = 0.0f;
 static char last_trend[8] = "*";
 static bool last_is_low = false;
 static bool last_is_high = false;
+static char last_timestamp[32] = "Unknown";
 
 esp_err_t display_init(void)
 {
@@ -84,38 +94,12 @@ void display_unlock(void)
     bsp_display_unlock();
 }
 
-// Calculate moon phase (0-7: new, waxing crescent, first quarter, waxing gibbous, full, waning gibbous, last quarter, waning crescent)
-static int calculate_moon_phase(void)
-{
-    // Get current time (days since epoch)
-    time_t now;
-    time(&now);
-    double days_since_new = fmod((now / 86400.0) - 10.0, 29.53);
-    int phase = (int)((days_since_new / 29.53) * 8.0);
-    return phase % 8;
-}
-
-static const char* get_moon_emoji(int phase)
-{
-    const char *moon_phases[] = {
-        "\xE2\x97\x8F",  // ● New moon (filled circle)
-        ")",             // Waxing crescent
-        "D",             // First quarter
-        "(",             // Waxing gibbous
-        "O",             // Full moon (letter O)
-        ")",             // Waning gibbous
-        "C",             // Last quarter
-        "("              // Waning crescent
-    };
-    return moon_phases[phase];
-}
-
 // Tap event to dismiss surprise screen
 static void surprise_screen_tap_event(lv_event_t *e)
 {
     ESP_LOGI(TAG, "Surprise screen dismissed");
     // Restore the last glucose screen
-    display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high);
+    display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high, last_timestamp);
 }
 
 // Hidden surprise screen
@@ -161,6 +145,41 @@ static void display_show_surprise(void)
     display_unlock();
     
     ESP_LOGI(TAG, "🔮 Surprise screen activated!");
+    
+    // Small delay to ensure screen is visible before audio
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Play surprise audio
+    if (spk_codec_dev != NULL) {
+        extern const uint8_t ahs_surprise_wav_start[] asm("_binary_ahs_surprise_wav_start");
+        extern const uint8_t ahs_surprise_wav_end[] asm("_binary_ahs_surprise_wav_end");
+        
+        size_t wav_size = ahs_surprise_wav_end - ahs_surprise_wav_start;
+        ESP_LOGI(TAG, "Playing surprise audio (%d bytes)", wav_size);
+        
+        // Parse WAV header: sample rate (offset 24-27), channels (offset 22-23)
+        if (wav_size > 44) {
+            uint16_t channels = *((uint16_t*)(ahs_surprise_wav_start + 22));
+            uint32_t sample_rate = *((uint32_t*)(ahs_surprise_wav_start + 24));
+            ESP_LOGI(TAG, "WAV: %lu Hz, %d channel(s)", sample_rate, channels);
+            
+            esp_codec_dev_sample_info_t fs = {
+                .sample_rate = sample_rate,
+                .channel = channels,
+                .bits_per_sample = 16,
+            };
+            
+            esp_codec_dev_close(spk_codec_dev);
+            esp_codec_dev_open(spk_codec_dev, &fs);
+            esp_codec_dev_set_out_vol(spk_codec_dev, 75);
+            
+            const uint8_t *pcm_data = ahs_surprise_wav_start + 44;
+            size_t pcm_size = wav_size - 44;
+            
+            int bytes_written = esp_codec_dev_write(spk_codec_dev, (void*)pcm_data, pcm_size);
+            ESP_LOGI(TAG, "Wrote %d bytes of PCM data", bytes_written);
+        }
+    }
 }
 
 void display_show_splash(void)
@@ -196,6 +215,88 @@ void display_show_splash(void)
     display_unlock();
     
     ESP_LOGI(TAG, "Splash screen displayed: Supreme Glucose PNG image");
+    
+    // Play splash audio
+    if (spk_codec_dev == NULL) {
+        // Initialize audio on first use
+        ESP_LOGI(TAG, "Initializing audio for splash screen...");
+        
+        // Configure speaker power GPIO (GPIO 46) - powers the amplifier
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << SPEAKER_PWR_GPIO),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        
+        esp_err_t ret = gpio_config(&io_conf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure speaker power GPIO%d: %s", SPEAKER_PWR_GPIO, esp_err_to_name(ret));
+        }
+        
+        // Set GPIO46 to HIGH to enable speaker amplifier power
+        gpio_set_level(SPEAKER_PWR_GPIO, 1);
+        ESP_LOGI(TAG, "GPIO%d set to HIGH (speaker amplifier powered ON)", SPEAKER_PWR_GPIO);
+        
+        // Small delay to let amplifier power stabilize
+        vTaskDelay(pdMS_TO_TICKS(50));
+        
+        // Initialize I2S for audio (pass NULL to use default configuration)
+        ret = bsp_audio_init(NULL);
+        if (ret == ESP_OK) {
+            spk_codec_dev = bsp_audio_codec_speaker_init();
+            if (spk_codec_dev != NULL) {
+                ESP_LOGI(TAG, "Audio codec initialized successfully");
+                esp_codec_dev_set_out_vol(spk_codec_dev, 80);  // Set volume to 80%
+            } else {
+                ESP_LOGE(TAG, "Failed to initialize speaker codec");
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize audio I2S: %s", esp_err_to_name(ret));
+        }
+    }
+    
+    // Play WAV audio if codec is ready
+    if (spk_codec_dev != NULL) {
+        ESP_LOGI(TAG, "Playing splash audio (WAV)...");
+        size_t wav_size = ahs_lala_wav_end - ahs_lala_wav_start;
+        ESP_LOGI(TAG, "WAV file size: %d bytes", wav_size);
+        
+        // Parse WAV header to get sample rate
+        // WAV header structure: bytes 24-27 = sample rate
+        uint32_t sample_rate = 22050; // Default
+        if (wav_size >= 28) {
+            sample_rate = ahs_lala_wav_start[24] | 
+                         (ahs_lala_wav_start[25] << 8) | 
+                         (ahs_lala_wav_start[26] << 16) | 
+                         (ahs_lala_wav_start[27] << 24);
+            ESP_LOGI(TAG, "WAV sample rate: %lu Hz", sample_rate);
+        }
+        
+        // Open the codec device with proper sample rate
+        esp_codec_dev_sample_info_t fs = {
+            .sample_rate = sample_rate,
+            .channel = 1,  // Mono
+            .bits_per_sample = 16
+        };
+        esp_codec_dev_open(spk_codec_dev, &fs);
+        
+        // Skip WAV header (typically 44 bytes) and play PCM data
+        const uint8_t *pcm_data = ahs_lala_wav_start + 44;
+        size_t pcm_size = wav_size - 44;
+        
+        ESP_LOGI(TAG, "Writing %d bytes of PCM data...", pcm_size);
+        int bytes_written = esp_codec_dev_write(spk_codec_dev, (void *)pcm_data, pcm_size);
+        
+        ESP_LOGI(TAG, "Audio playback complete (%d bytes written)", bytes_written);
+        
+        // Small delay to ensure audio finishes playing
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // Close codec
+        esp_codec_dev_close(spk_codec_dev);
+    }
 }
 
 void display_show_about(display_button_callback_t callback)
@@ -391,13 +492,16 @@ static void glucose_screen_tap_event(lv_event_t *e)
     }
 }
 
-void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high)
+void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high, const char *timestamp)
 {
     // Store values for restoring after surprise screen
     last_glucose_mmol = glucose_mmol;
     strncpy(last_trend, trend, sizeof(last_trend) - 1);
     last_trend[sizeof(last_trend) - 1] = '\0';
     last_is_low = is_low;
+    last_is_high = is_high;
+    strncpy(last_timestamp, timestamp ? timestamp : "Unknown", sizeof(last_timestamp) - 1);
+    last_timestamp[sizeof(last_timestamp) - 1] = '\0';
     last_is_high = is_high;
     
     display_lock();
@@ -490,24 +594,12 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     // Timestamp below status
     lv_obj_t *timestamp_label = lv_label_create(screen);
     char timestamp_text[64];
-    time_t now;
-    struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
-    strftime(timestamp_text, sizeof(timestamp_text), "Last updated %d/%m/%Y %H:%M", &timeinfo);
+    snprintf(timestamp_text, sizeof(timestamp_text), "Last updated: %s", timestamp ? timestamp : "Unknown");
     lv_label_set_text(timestamp_label, timestamp_text);
     lv_obj_set_style_text_color(timestamp_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(timestamp_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(timestamp_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(timestamp_label, LV_ALIGN_BOTTOM_MID, 0, -15);
-    
-    // Moon phase indicator (top right)
-    moon_label = lv_label_create(screen);
-    int moon_phase = calculate_moon_phase();
-    lv_label_set_text(moon_label, get_moon_emoji(moon_phase));
-    lv_obj_set_style_text_color(moon_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(moon_label, &lv_font_montserrat_18, 0);
-    lv_obj_align(moon_label, LV_ALIGN_TOP_RIGHT, -10, 10);
     
     // Add tap event for surprise screen
     lv_obj_add_event_cb(screen, glucose_screen_tap_event, LV_EVENT_CLICKED, NULL);
@@ -904,7 +996,15 @@ void display_ota_warning_start_update(void)
         lv_label_set_text(ota_warning_text, "Updating...\n\nPlease wait");
     }
     
+    // Force LVGL to invalidate and refresh the display immediately
+    if (current_screen) {
+        lv_obj_invalidate(current_screen);
+    }
+    
     display_unlock();
+    
+    // Force LVGL task to process the updates NOW before returning
+    lv_timer_handler();
     
     ESP_LOGI(TAG, "OTA warning transitioned to updating state");
 }

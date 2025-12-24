@@ -16,6 +16,7 @@
 #include "esp_netif.h"
 #include "esp_http_server.h"
 #include <string.h>
+#include <stdlib.h>
 
 static const char *TAG = "WIFI_MANAGER";
 
@@ -132,14 +133,23 @@ static const char* html_librelink =
 "  });"
 "}"
 "function selectPatient(){"
-"  document.getElementById('patient_id').value=document.getElementById('patient-select').value;"
+"  const patientId=document.getElementById('patient-select').value;"
+"  document.getElementById('patient_id').value=patientId;"
+"  validateForm();"
 "}"
+"function validateForm(){"
+"  const email=document.getElementById('email').value;"
+"  const password=document.getElementById('password').value;"
+"  const patientId=document.getElementById('patient_id').value;"
+"  document.getElementById('save-btn').disabled=!(email&&password&&patientId);"
+"}"
+"window.onload=function(){document.getElementById('save-btn').disabled=true;}"
 "</script>"
 "</head><body><h1>LibreLink Setup</h1>"
 "<p>Configure your LibreLinkUp credentials</p>"
 "<form action='/libre/save' method='post'>"
-"<input id='email' name='email' type='email' placeholder='LibreLink Email' required><br>"
-"<input id='password' name='password' type='password' placeholder='LibreLink Password' required><br>"
+"<input id='email' name='email' type='email' placeholder='LibreLink Email' required oninput='validateForm()'><br>"
+"<input id='password' name='password' type='password' placeholder='LibreLink Password' required oninput='validateForm()'><br>"
 "<select id='server' name='server'><option value='0'>Global Server</option><option value='1'>EU Server</option></select>"
 "<button type='button' id='load-btn' class='load-btn' onclick='loadPatients()'>Load Patient(s)</button>"
 "<div id='loading' class='loading' style='display:none'>Loading patients...</div>"
@@ -148,7 +158,7 @@ static const char* html_librelink =
 "<select id='patient-select' onchange='selectPatient()'></select>"
 "</div>"
 "<input id='patient_id' name='patient_id' type='hidden'><br>"
-"<button type='submit'>Save Credentials</button></form>"
+"<button id='save-btn' type='submit'>Save Credentials</button></form>"
 "<button class='back' onclick=\"location.href='/'\">Back to Menu</button></body></html>";
 
 // HTML for Global Settings page
@@ -239,6 +249,35 @@ static const char* success_page =
 "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>"
 "<style>body{font-family:Arial;text-align:center;margin:50px;}</style>"
 "</head><body><h1>Success!</h1><p>WiFi credentials saved. Device will now restart and connect.</p></body></html>";
+
+// URL decode helper function
+static void url_decode(char *dst, const char *src, size_t dst_size) {
+    if (!dst || !src || dst_size == 0) return;
+    
+    size_t src_len = strlen(src);
+    size_t j = 0;
+    
+    for (size_t i = 0; i < src_len && j < dst_size - 1; i++) {
+        if (src[i] == '%' && i + 2 < src_len) {
+            // Decode %XX
+            char hex[3] = {src[i+1], src[i+2], '\0'};
+            char *endptr;
+            long val = strtol(hex, &endptr, 16);
+            if (endptr == hex + 2) {  // Valid hex
+                dst[j++] = (char)val;
+                i += 2;
+            } else {
+                dst[j++] = src[i];
+            }
+        } else if (src[i] == '+') {
+            // Convert '+' to space
+            dst[j++] = ' ';
+        } else {
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+}
 
 // HTTP GET handler for root - main menu
 static esp_err_t root_get_handler(httpd_req_t *req) {
@@ -384,14 +423,29 @@ static esp_err_t libre_save_post_handler(httpd_req_t *req) {
                 use_eu_server = (*(server_start + 7) == '1');
             }
             
+            // Validate patient ID is provided
+            if (strlen(patient_id) == 0) {
+                const char* error_page = "<html><body><h1>Error</h1><p>Please select a patient before saving.</p><button onclick='history.back()'>Go Back</button></body></html>";
+                httpd_resp_send(req, error_page, strlen(error_page));
+                return ESP_OK;
+            }
+            
             // Save credentials
-            esp_err_t err = libre_credentials_save(email, password, 
-                                                    patient_id[0] ? patient_id : NULL, 
-                                                    use_eu_server);
+            esp_err_t err = libre_credentials_save(email, password, patient_id, use_eu_server);
             
             if (err == ESP_OK) {
                 ESP_LOGI(TAG, "LibreLink credentials saved");
+                const char* success_page = 
+                    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>"
+                    "<style>body{font-family:Arial;text-align:center;margin:50px;background:#1a1a1a;color:#fff;}h1{color:#4CAF50;}</style>"
+                    "</head><body><h1>Success!</h1><p>LibreLink credentials saved successfully.</p>"
+                    "<p>Device will restart and begin monitoring glucose levels.</p></body></html>";
                 httpd_resp_send(req, success_page, strlen(success_page));
+                
+                // Restart device after a short delay
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                esp_restart();
+                
                 return ESP_OK;
             }
         }
@@ -417,12 +471,12 @@ static esp_err_t libre_patients_get_handler(httpd_req_t *req) {
             
             // Get email
             if (httpd_query_key_value(buf, "email", param, sizeof(param)) == ESP_OK) {
-                strncpy(email, param, sizeof(email) - 1);
+                url_decode(email, param, sizeof(email));
             }
             
             // Get password
             if (httpd_query_key_value(buf, "pass", param, sizeof(param)) == ESP_OK) {
-                strncpy(password, param, sizeof(password) - 1);
+                url_decode(password, param, sizeof(password));
             }
             
             // Get server
@@ -431,6 +485,17 @@ static esp_err_t libre_patients_get_handler(httpd_req_t *req) {
             }
         }
     }
+    
+    // Validate credentials
+    if (strlen(email) == 0 || strlen(password) == 0) {
+        ESP_LOGW(TAG, "Empty credentials received");
+        const char* error_response = "{\"success\":false,\"error\":\"Email and password are required\"}";
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, error_response, strlen(error_response));
+        return ESP_OK;
+    }
+    
+    ESP_LOGI(TAG, "Attempting LibreLink login (email length: %d)", strlen(email));
     
     // Test connection and get connections list
     librelinkup_init(use_eu_server);
@@ -444,7 +509,7 @@ static esp_err_t libre_patients_get_handler(httpd_req_t *req) {
         if (err == ESP_OK) {
             httpd_resp_set_type(req, "application/json");
             httpd_resp_send(req, response, strlen(response));
-            librelinkup_logout();
+            // Don't logout - main task uses the same session
             return ESP_OK;
         }
     }
@@ -453,7 +518,7 @@ static esp_err_t libre_patients_get_handler(httpd_req_t *req) {
     const char* error_response = "{\"success\":false,\"error\":\"Login failed or no patients found\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, error_response, strlen(error_response));
-    librelinkup_logout();
+    // Don't logout on error either - may interfere with main task
     return ESP_OK;
 }
 
@@ -504,7 +569,7 @@ static esp_err_t libre_test_get_handler(httpd_req_t *req) {
                      patient_id);
             httpd_resp_set_type(req, "application/json");
             httpd_resp_send(req, response, strlen(response));
-            librelinkup_logout();
+            // Don't logout - main task uses the same session
             return ESP_OK;
         }
     }
@@ -513,7 +578,7 @@ static esp_err_t libre_test_get_handler(httpd_req_t *req) {
     const char* error_response = "{\"success\":false,\"error\":\"Login failed\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, error_response, strlen(error_response));
-    librelinkup_logout();
+    // Don't logout on error either
     return ESP_OK;
 }
 
@@ -760,6 +825,7 @@ static void start_webserver(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_uri_handlers = 28;  // Increased for comprehensive captive portal coverage + new pages
+    config.stack_size = 8192;  // Increase stack size for HTTP handlers that make outbound requests
     
     if (httpd_start(&server, &config) == ESP_OK) {
         // Main portal page

@@ -10,6 +10,10 @@
 #include "esp_err.h"
 #include <stdbool.h>
 
+// Custom error codes (using custom base 0x6000 for application-specific errors)
+#define ESP_ERR_LIBRE_RATE_LIMITED    0x6001  // Rate limited (429)
+#define ESP_ERR_LIBRE_AUTH_FAILED     0x6002  // Authentication failed (401)
+
 // API configuration
 #define LIBRELINKUP_API_URL_GLOBAL "https://api.libreview.io"
 #define LIBRELINKUP_API_URL_EU     "https://api-eu.libreview.io"

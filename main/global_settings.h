@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 // Default values
-#define DEFAULT_LIBRELINK_INTERVAL_MINUTES 5
+#define DEFAULT_LIBRELINK_INTERVAL_MINUTES 2
 #define DEFAULT_MOON_LAMP_ENABLED true
 
 /**
