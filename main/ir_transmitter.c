@@ -344,14 +344,14 @@ esp_err_t ir_transmitter_send_command(uint16_t address, uint8_t command)
     return ESP_OK;
 }
 
-esp_err_t ir_transmitter_set_moon_lamp_color(bool is_low, bool is_high, bool is_normal)
+esp_err_t ir_transmitter_set_moon_lamp_color(int measurement_color)
 {
     if (!global_settings_is_moon_lamp_enabled()) {
         ESP_LOGD(TAG, "Moon Lamp control is disabled");
         return ESP_OK;
     }
     
-    ESP_LOGI(TAG, "Setting Moon Lamp color - Low: %d, High: %d, Normal: %d", is_low, is_high, is_normal);
+    ESP_LOGI(TAG, "Setting Moon Lamp color based on measurement_color: %d", measurement_color);
     
     // Always send ON command first
     esp_err_t ret = ir_transmitter_send_command(IR_REMOTE_ADDRESS, IR_CMD_ON);
@@ -363,16 +363,21 @@ esp_err_t ir_transmitter_set_moon_lamp_color(bool is_low, bool is_high, bool is_
     // Wait a bit between commands
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Determine color based on glucose state
+    // Determine color based on measurement_color from LibreLink API
+    // 1 = Normal (green), 2 = Warning (red/amber), 3 = Hypo (red)
     uint8_t color_cmd;
-    if (is_low || is_high) {
-        // Low or high glucose -> RED
+    if (measurement_color == 3) {
+        // Hypo (critical low) -> RED
         color_cmd = IR_CMD_RED;
-        ESP_LOGI(TAG, "Setting Moon Lamp to RED (glucose alert)");
-    } else if (is_normal) {
-        // Normal glucose -> GREEN
+        ESP_LOGI(TAG, "Setting Moon Lamp to RED (hypo)");
+    } else if (measurement_color == 2) {
+        // Warning/High -> RED (closest to amber/orange)
+        color_cmd = IR_CMD_RED;
+        ESP_LOGI(TAG, "Setting Moon Lamp to RED (warning/high)");
+    } else if (measurement_color == 1) {
+        // Normal -> GREEN
         color_cmd = IR_CMD_GREEN;
-        ESP_LOGI(TAG, "Setting Moon Lamp to GREEN (normal glucose)");
+        ESP_LOGI(TAG, "Setting Moon Lamp to GREEN (normal)");
     } else {
         // Unknown state -> WHITE
         color_cmd = IR_CMD_WHITE;

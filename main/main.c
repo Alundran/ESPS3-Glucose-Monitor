@@ -44,6 +44,8 @@ static void on_setup_next_button(void);
 static void on_retry_button(void);
 static void on_restart_setup_button(void);
 static void on_reset_button(void);
+static void on_about_button(void);
+static void on_about_back_button(void);
 static void red_button_handler(void *arg, void *data);
 static void on_ota_proceed(void);
 static void on_ota_cancel(void);
@@ -223,10 +225,16 @@ static void red_button_handler(void *arg, void *data) {
         } else if (libre_credentials_exist()) {
             // Real credentials - show current glucose if we have it, otherwise loading
             if (current_glucose.value_mmol > 0) {
-                display_show_glucose(current_glucose.value_mmol, 
-                                   librelinkup_get_trend_string(current_glucose.trend), 
-                                   current_glucose.is_low, current_glucose.is_high,
-                                   current_glucose.timestamp, current_glucose.measurement_color);
+                // Check if data is stale before showing
+                if (is_glucose_data_stale(current_glucose.timestamp)) {
+                    ESP_LOGW(TAG, "Glucose data is stale when returning from settings");
+                    display_show_no_recent_data();
+                } else {
+                    display_show_glucose(current_glucose.value_mmol, 
+                                       librelinkup_get_trend_string(current_glucose.trend), 
+                                       current_glucose.is_low, current_glucose.is_high,
+                                       current_glucose.timestamp, current_glucose.measurement_color);
+                }
             } else {
                 display_show_wifi_status("Loading glucose data...");
             }
@@ -237,11 +245,21 @@ static void red_button_handler(void *arg, void *data) {
     } else {
         // Show settings
         settings_shown = true;
-        display_show_settings(on_reset_button);
+        display_show_settings(on_reset_button, on_about_button);
     }
 }
 
-// Settings screen callback
+// Settings screen callbacks
+static void on_about_button(void) {
+    ESP_LOGI(TAG, "About button pressed");
+    display_show_about_message(on_about_back_button);
+}
+
+static void on_about_back_button(void) {
+    ESP_LOGI(TAG, "About back button pressed");
+    display_show_settings(on_reset_button, on_about_button);
+}
+
 static void on_reset_button(void) {
     ESP_LOGI(TAG, "Reset button pressed - clearing credentials and restarting");
     wifi_manager_clear_credentials();
@@ -274,10 +292,16 @@ static void on_ota_cancel(void) {
                            current_glucose.timestamp, current_glucose.measurement_color);
     } else if (libre_credentials_exist()) {
         if (current_glucose.value_mmol > 0) {
-            display_show_glucose(current_glucose.value_mmol, 
-                               librelinkup_get_trend_string(current_glucose.trend), 
-                               current_glucose.is_low, current_glucose.is_high,
-                               current_glucose.timestamp, current_glucose.measurement_color);
+            // Check if data is stale before showing
+            if (is_glucose_data_stale(current_glucose.timestamp)) {
+                ESP_LOGW(TAG, "Glucose data is stale when canceling OTA");
+                display_show_no_recent_data();
+            } else {
+                display_show_glucose(current_glucose.value_mmol, 
+                                   librelinkup_get_trend_string(current_glucose.trend), 
+                                   current_glucose.is_low, current_glucose.is_high,
+                                   current_glucose.timestamp, current_glucose.measurement_color);
+            }
         } else {
             display_show_wifi_status("Loading glucose data...");
         }

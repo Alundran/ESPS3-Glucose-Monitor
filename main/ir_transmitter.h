@@ -37,6 +37,6 @@ esp_err_t ir_transmitter_send_command(uint16_t address, uint8_t command);
  * @param is_normal True if glucose is normal (will send GREEN)
  * @return ESP_OK on success, error code otherwise
  */
-esp_err_t ir_transmitter_set_moon_lamp_color(bool is_low, bool is_high, bool is_normal);
+esp_err_t ir_transmitter_set_moon_lamp_color(int measurement_color);
 
 #endif // IR_TRANSMITTER_H

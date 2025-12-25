@@ -77,8 +77,15 @@ void display_show_connection_failed(display_button_callback_t retry_cb, display_
 /**
  * Show settings screen
  * @param reset_cb Callback for Reset button
+ * @param about_cb Callback for About button
  */
-void display_show_settings(display_button_callback_t reset_cb);
+void display_show_settings(display_button_callback_t reset_cb, display_button_callback_t about_cb);
+
+/**
+ * Show about screen with message
+ * @param back_cb Callback for Back button
+ */
+void display_show_about_message(display_button_callback_t back_cb);
 
 /**
  * Show LibreLink setup screen with QR code

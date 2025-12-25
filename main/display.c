@@ -597,11 +597,10 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     display_unlock();
     
     // Send IR command to Moon Lamp if enabled
-    bool is_normal = !is_low && !is_high;
-    ir_transmitter_set_moon_lamp_color(is_low, is_high, is_normal);
+    ir_transmitter_set_moon_lamp_color(measurement_color);
     
-    ESP_LOGI(TAG, "Glucose screen displayed: %.1f mmol/L %s (Low: %d, High: %d)", 
-             glucose_mmol, trend, is_low, is_high);
+    ESP_LOGI(TAG, "Glucose screen displayed: %.1f mmol/L %s (Low: %d, High: %d), Color: %d", 
+             glucose_mmol, trend, is_low, is_high, measurement_color);
 }
 
 void display_show_no_recent_data(void)
@@ -719,6 +718,7 @@ void display_show_connection_failed(display_button_callback_t retry_cb, display_
 
 // Static callback for settings screen
 static display_button_callback_t reset_callback = NULL;
+static display_button_callback_t about_callback = NULL;
 
 static void reset_button_event(lv_event_t *e) {
     if (reset_callback) {
@@ -726,9 +726,16 @@ static void reset_button_event(lv_event_t *e) {
     }
 }
 
-void display_show_settings(display_button_callback_t reset_cb)
+static void about_button_event(lv_event_t *e) {
+    if (about_callback) {
+        about_callback();
+    }
+}
+
+void display_show_settings(display_button_callback_t reset_cb, display_button_callback_t about_cb)
 {
     reset_callback = reset_cb;
+    about_callback = about_cb;
     
     display_lock();
     
@@ -755,12 +762,24 @@ void display_show_settings(display_button_callback_t reset_cb)
     lv_obj_set_style_text_color(config_url, lv_color_make(150, 150, 150), 0);
     lv_obj_set_style_text_font(config_url, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(config_url, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(config_url, LV_ALIGN_CENTER, 0, -50);
+    lv_obj_align(config_url, LV_ALIGN_CENTER, 0, -60);
+    
+    // About button
+    lv_obj_t *about_btn = lv_btn_create(screen);
+    lv_obj_set_size(about_btn, 200, 50);
+    lv_obj_align(about_btn, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_set_style_bg_color(about_btn, lv_color_make(100, 100, 255), 0);
+    lv_obj_add_event_cb(about_btn, about_button_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *about_label = lv_label_create(about_btn);
+    lv_label_set_text(about_label, "About");
+    lv_obj_set_style_text_font(about_label, &lv_font_montserrat_18, 0);
+    lv_obj_center(about_label);
     
     // Reset button
     lv_obj_t *reset_btn = lv_btn_create(screen);
     lv_obj_set_size(reset_btn, 200, 50);
-    lv_obj_align(reset_btn, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_align(reset_btn, LV_ALIGN_CENTER, 0, 70);
     lv_obj_set_style_bg_color(reset_btn, lv_color_make(255, 100, 100), 0);
     lv_obj_add_event_cb(reset_btn, reset_button_event, LV_EVENT_CLICKED, NULL);
     
@@ -769,20 +788,69 @@ void display_show_settings(display_button_callback_t reset_cb)
     lv_obj_set_style_text_font(reset_label, &lv_font_montserrat_18, 0);
     lv_obj_center(reset_label);
     
-    // Info text
-    lv_obj_t *info = lv_label_create(screen);
-    lv_label_set_text(info, "This will clear all WiFi\ncredentials and restart");
-    lv_obj_set_style_text_color(info, lv_color_make(150, 150, 150), 0);
-    lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(info, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(info, LV_ALIGN_BOTTOM_MID, 0, -30);
-    
     lv_screen_load(screen);
     current_screen = screen;
     
     display_unlock();
     
     ESP_LOGI(TAG, "Settings screen displayed");
+}
+
+// Static callback for about screen
+static display_button_callback_t about_back_callback = NULL;
+
+static void about_back_button_event(lv_event_t *e) {
+    if (about_back_callback) {
+        about_back_callback();
+    }
+}
+
+void display_show_about_message(display_button_callback_t back_cb)
+{
+    about_back_callback = back_cb;
+    
+    display_lock();
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    
+    // Title
+    lv_obj_t *title = lv_label_create(screen);
+    lv_label_set_text(title, "About");
+    lv_obj_set_style_text_color(title, lv_color_make(76, 175, 80), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
+    
+    // Message
+    lv_obj_t *message = lv_label_create(screen);
+    lv_label_set_text(message, "For the Supreme,\ndeveloped by Spalding.\n\nOderint dum metuant.\n\n<3");
+    lv_obj_set_style_text_color(message, lv_color_make(200, 200, 200), 0);
+    lv_obj_set_style_text_font(message, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(message, LV_ALIGN_CENTER, 0, -20);
+    
+    // Back button
+    lv_obj_t *back_btn = lv_btn_create(screen);
+    lv_obj_set_size(back_btn, 200, 50);
+    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_set_style_bg_color(back_btn, lv_color_make(100, 100, 255), 0);
+    lv_obj_add_event_cb(back_btn, about_back_button_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, 0);
+    lv_obj_center(back_label);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "About message screen displayed");
 }
 
 void display_show_librelink_qr(const char *ip)
