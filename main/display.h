@@ -46,6 +46,16 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
 void display_show_no_recent_data(void);
 
 /**
+ * Show date/time/moon phase screen (activated by slide-down gesture)
+ */
+void display_show_datetime_moon(void);
+
+/**
+ * Show random quote screen (activated by slide-up gesture)
+ */
+void display_show_random_quote(void);
+
+/**
  * Button callback function type
  */
 typedef void (*display_button_callback_t)(void);

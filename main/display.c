@@ -3,14 +3,17 @@
 #include "wifi_manager.h"
 #include "ir_transmitter.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
 #include "esp_codec_dev.h"
 #include "driver/gpio.h"
+#include "cJSON.h"
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#include <stdlib.h>
 
 // Speaker power amplifier GPIO (GPIO 46)
 #define SPEAKER_PWR_GPIO GPIO_NUM_46
@@ -22,6 +25,10 @@ extern const uint8_t supreme_glucose_splash_png_end[] asm("_binary_supreme_gluco
 // Embedded WAV audio file
 extern const uint8_t ahs_lala_wav_start[] asm("_binary_ahs_lala_wav_start");
 extern const uint8_t ahs_lala_wav_end[] asm("_binary_ahs_lala_wav_end");
+
+// Embedded JSON quotes file
+extern const uint8_t random_quotes_json_start[] asm("_binary_random_quotes_json_start");
+extern const uint8_t random_quotes_json_end[] asm("_binary_random_quotes_json_end");
 
 static const char *TAG = "DISPLAY";
 
@@ -460,6 +467,162 @@ static void flash_timer_cb(lv_timer_t *timer) {
     }
 }
 
+// Moon phase calculation
+static float calculate_moon_age(void) {
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    
+    int year = timeinfo.tm_year + 1900;
+    int month = timeinfo.tm_mon + 1;
+    int day = timeinfo.tm_mday;
+    
+    // Calculate days since known new moon (Jan 6, 2000)
+    // Using simplified Julian date calculation
+    int a = (14 - month) / 12;
+    int y = year - a;
+    int m = month + 12 * a - 3;
+    
+    // Julian day number
+    long jdn = day + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045;
+    
+    // Days since Jan 6, 2000 (JD 2451550)
+    long daysSince = jdn - 2451550;
+    
+    // Moon age in days (lunar cycle is ~29.53 days)
+    float moonAge = fmodf((float)daysSince, 29.53f);
+    if (moonAge < 0) moonAge += 29.53f;
+    
+    return moonAge;
+}
+
+static const char* get_moon_phase_name(float age) {
+    float normalizedPhase = age / 29.53f;
+    
+    if (normalizedPhase < 0.03f || normalizedPhase > 0.97f) return "New Moon";
+    else if (normalizedPhase < 0.22f) return "Waxing Crescent";
+    else if (normalizedPhase >= 0.22f && normalizedPhase < 0.28f) return "First Quarter";
+    else if (normalizedPhase >= 0.28f && normalizedPhase < 0.47f) return "Waxing Gibbous";
+    else if (normalizedPhase >= 0.47f && normalizedPhase < 0.53f) return "Full Moon";
+    else if (normalizedPhase >= 0.53f && normalizedPhase < 0.72f) return "Waning Gibbous";
+    else if (normalizedPhase >= 0.72f && normalizedPhase < 0.78f) return "Last Quarter";
+    else return "Waning Crescent";
+}
+
+// Structure to hold quote data
+typedef struct {
+    char quote[256];
+    char character[64];
+    char episode[64];
+} quote_data_t;
+
+// Get random quote from JSON file
+static bool get_random_quote(quote_data_t *quote_data) {
+    // Parse the embedded JSON file
+    const char* json_str = (const char*)random_quotes_json_start;
+    size_t json_len = random_quotes_json_end - random_quotes_json_start;
+    
+    cJSON *json = cJSON_ParseWithLength(json_str, json_len);
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to parse quotes JSON");
+        return false;
+    }
+    
+    cJSON *quotes_array = cJSON_GetObjectItem(json, "quotes");
+    if (!cJSON_IsArray(quotes_array)) {
+        ESP_LOGE(TAG, "Quotes array not found in JSON");
+        cJSON_Delete(json);
+        return false;
+    }
+    
+    int quote_count = cJSON_GetArraySize(quotes_array);
+    if (quote_count == 0) {
+        ESP_LOGE(TAG, "No quotes in array");
+        cJSON_Delete(json);
+        return false;
+    }
+    
+    // Get random quote
+    int random_index = esp_random() % quote_count;
+    cJSON *quote_item = cJSON_GetArrayItem(quotes_array, random_index);
+    
+    if (!cJSON_IsObject(quote_item)) {
+        ESP_LOGE(TAG, "Quote item is not an object");
+        cJSON_Delete(json);
+        return false;
+    }
+    
+    // Extract quote text
+    cJSON *quote_text = cJSON_GetObjectItem(quote_item, "quote");
+    if (cJSON_IsString(quote_text)) {
+        strncpy(quote_data->quote, quote_text->valuestring, sizeof(quote_data->quote) - 1);
+        quote_data->quote[sizeof(quote_data->quote) - 1] = '\0';
+    } else {
+        cJSON_Delete(json);
+        return false;
+    }
+    
+    // Extract character
+    cJSON *character = cJSON_GetObjectItem(quote_item, "character");
+    if (cJSON_IsString(character)) {
+        strncpy(quote_data->character, character->valuestring, sizeof(quote_data->character) - 1);
+        quote_data->character[sizeof(quote_data->character) - 1] = '\0';
+    } else {
+        strcpy(quote_data->character, "Unknown");
+    }
+    
+    // Extract episode
+    cJSON *episode = cJSON_GetObjectItem(quote_item, "episode");
+    if (cJSON_IsString(episode)) {
+        strncpy(quote_data->episode, episode->valuestring, sizeof(quote_data->episode) - 1);
+        quote_data->episode[sizeof(quote_data->episode) - 1] = '\0';
+    } else {
+        strcpy(quote_data->episode, "Unknown");
+    }
+    
+    cJSON_Delete(json);
+    
+    ESP_LOGI(TAG, "Selected quote #%d: '%s' - %s (%s)", random_index, 
+             quote_data->quote, quote_data->character, quote_data->episode);
+    
+    return true;
+}
+
+// Gesture event handler for quote screen (tap or slide to return to glucose)
+static void quote_gesture_event(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    
+    if (code == LV_EVENT_CLICKED || code == LV_EVENT_GESTURE) {
+        ESP_LOGI(TAG, "Quote screen dismissed, returning to glucose screen");
+        display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high, last_timestamp, last_measurement_color);
+    }
+}
+
+// Gesture event handler for glucose screen (slide down to show datetime/moon, slide up for quote)
+static void glucose_gesture_event(lv_event_t *e) {
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+    
+    if (dir == LV_DIR_BOTTOM) {
+        ESP_LOGI(TAG, "Slide-down gesture detected, showing datetime/moon screen");
+        display_show_datetime_moon();
+    } else if (dir == LV_DIR_TOP) {
+        ESP_LOGI(TAG, "Slide-up gesture detected, showing random quote");
+        display_show_random_quote();
+    }
+}
+
+// Gesture event handler for datetime/moon screen (slide up to return to glucose)
+static void datetime_gesture_event(lv_event_t *e) {
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+    
+    if (dir == LV_DIR_TOP) {
+        ESP_LOGI(TAG, "Slide-up gesture detected, returning to glucose screen");
+        // Restore last glucose screen
+        display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high, last_timestamp, last_measurement_color);
+    }
+}
+
 // Tap event handler for surprise screen
 static void glucose_screen_tap_event(lv_event_t *e)
 {
@@ -591,6 +754,9 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     // Add tap event for surprise screen
     lv_obj_add_event_cb(screen, glucose_screen_tap_event, LV_EVENT_CLICKED, NULL);
     
+    // Add gesture event for slide-down to datetime/moon screen
+    lv_obj_add_event_cb(screen, glucose_gesture_event, LV_EVENT_GESTURE, NULL);
+    
     lv_screen_load(screen);
     current_screen = screen;
     
@@ -637,6 +803,206 @@ void display_show_no_recent_data(void)
     display_unlock();
     
     ESP_LOGI(TAG, "No recent data screen displayed");
+}
+
+void display_show_datetime_moon(void)
+{
+    display_lock();
+    
+    // Stop any existing flash timer
+    if (flash_timer != NULL) {
+        lv_timer_del(flash_timer);
+        flash_timer = NULL;
+    }
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    
+    // Dark blue/purple background for night sky theme
+    lv_obj_set_style_bg_color(screen, lv_color_make(20, 20, 50), 0);
+    
+    // Get current time
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    
+    // Check if time is valid (year > 2020)
+    bool time_valid = (timeinfo.tm_year + 1900) > 2020;
+    
+    if (!time_valid) {
+        // Show "Time not synced" message
+        lv_obj_t *error_label = lv_label_create(screen);
+        lv_label_set_text(error_label, "Time not\nsynced yet");
+        lv_obj_set_style_text_color(error_label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(error_label, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_align(error_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(error_label);
+    } else {
+        // Calculate moon phase
+        float moonAge = calculate_moon_age();
+        const char* moonPhase = get_moon_phase_name(moonAge);
+        
+        // Calculate days until next full moon
+        // Full moon occurs at ~14.765 days (half of 29.53 day cycle)
+        float daysToFullMoon;
+        if (moonAge < 14.765f) {
+            daysToFullMoon = 14.765f - moonAge;
+        } else {
+            daysToFullMoon = 29.53f - moonAge + 14.765f;
+        }
+        
+        // Calculate the date of next full moon
+        time_t next_full_moon_time = now + (time_t)(daysToFullMoon * 86400); // 86400 seconds per day
+        struct tm next_full_moon_tm;
+        localtime_r(&next_full_moon_time, &next_full_moon_tm);
+        
+        // Date at top (Day, DD Month YYYY)
+        lv_obj_t *date_label = lv_label_create(screen);
+        char date_text[64];
+        const char* weekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+        const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+        snprintf(date_text, sizeof(date_text), "%s, %d %s %d", 
+                 weekdays[timeinfo.tm_wday], 
+                 timeinfo.tm_mday, 
+                 months[timeinfo.tm_mon],
+                 timeinfo.tm_year + 1900);
+        lv_label_set_text(date_label, date_text);
+        lv_obj_set_style_text_color(date_label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(date_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(date_label, LV_ALIGN_TOP_MID, 0, 20);
+        
+        // Large time display (HH:MM)
+        lv_obj_t *time_label = lv_label_create(screen);
+        char time_text[16];
+        snprintf(time_text, sizeof(time_text), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+        lv_label_set_text(time_label, time_text);
+        lv_obj_set_style_text_color(time_label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(time_label, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_align(time_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_transform_scale(time_label, 250, 0);  // Scale up 2.5x
+        lv_obj_align(time_label, LV_ALIGN_CENTER, 0, -20);
+        
+        // Moon phase name
+        lv_obj_t *moon_phase_label = lv_label_create(screen);
+        lv_label_set_text(moon_phase_label, moonPhase);
+        lv_obj_set_style_text_color(moon_phase_label, lv_color_make(200, 200, 255), 0); // Light blue
+        lv_obj_set_style_text_font(moon_phase_label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_align(moon_phase_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(moon_phase_label, LV_ALIGN_BOTTOM_MID, 0, -60);
+        
+        // Next full moon info
+        lv_obj_t *full_moon_label = lv_label_create(screen);
+        char full_moon_text[80];
+        snprintf(full_moon_text, sizeof(full_moon_text), "Next Full Moon: %s %d %s", 
+                 weekdays[next_full_moon_tm.tm_wday],
+                 next_full_moon_tm.tm_mday,
+                 months[next_full_moon_tm.tm_mon]);
+        lv_label_set_text(full_moon_label, full_moon_text);
+        lv_obj_set_style_text_color(full_moon_label, lv_color_make(255, 255, 200), 0); // Slight yellow tint
+        lv_obj_set_style_text_font(full_moon_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(full_moon_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(full_moon_label, LV_ALIGN_BOTTOM_MID, 0, -40);
+        
+        // Instruction text at bottom
+        lv_obj_t *instruction_label = lv_label_create(screen);
+        lv_label_set_text(instruction_label, "Slide up to return");
+        lv_obj_set_style_text_color(instruction_label, lv_color_make(150, 150, 150), 0); // Gray
+        lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(instruction_label, LV_ALIGN_BOTTOM_MID, 0, -5);
+        
+        ESP_LOGI(TAG, "DateTime/Moon screen displayed: %s, Moon: %s, Next Full Moon: %s %d %s", 
+                 date_text, moonPhase, 
+                 weekdays[next_full_moon_tm.tm_wday],
+                 next_full_moon_tm.tm_mday,
+                 months[next_full_moon_tm.tm_mon]);
+    }
+    
+    // Add gesture event for slide-up to return to glucose screen
+    lv_obj_add_event_cb(screen, datetime_gesture_event, LV_EVENT_GESTURE, NULL);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+}
+
+void display_show_random_quote(void)
+{
+    display_lock();
+    
+    // Stop any existing flash timer
+    if (flash_timer != NULL) {
+        lv_timer_del(flash_timer);
+        flash_timer = NULL;
+    }
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    
+    // Deep purple background for mystical theme
+    lv_obj_set_style_bg_color(screen, lv_color_make(50, 20, 60), 0);
+    
+    // Get random quote
+    quote_data_t quote_data;
+    bool success = get_random_quote(&quote_data);
+    
+    if (!success) {
+        // Fallback if JSON parsing fails
+        strcpy(quote_data.quote, "The power within you is stronger than you know.");
+        strcpy(quote_data.character, "Unknown");
+        strcpy(quote_data.episode, "Unknown");
+    }
+    
+    // Quote text
+    lv_obj_t *quote_label = lv_label_create(screen);
+    lv_label_set_text(quote_label, quote_data.quote);
+    lv_obj_set_style_text_color(quote_label, lv_color_make(220, 200, 255), 0); // Light purple
+    lv_obj_set_style_text_font(quote_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_align(quote_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(quote_label, 280); // Allow text wrapping
+    lv_label_set_long_mode(quote_label, LV_LABEL_LONG_WRAP);
+    lv_obj_align(quote_label, LV_ALIGN_CENTER, 0, -20);
+    
+    // Character and episode attribution
+    lv_obj_t *attribution_label = lv_label_create(screen);
+    char attribution_text[150];
+    snprintf(attribution_text, sizeof(attribution_text), "%s (%s)", 
+             quote_data.character, quote_data.episode);
+    lv_label_set_text(attribution_label, attribution_text);
+    lv_obj_set_style_text_color(attribution_label, lv_color_make(180, 160, 200), 0); // Slightly darker purple
+    lv_obj_set_style_text_font(attribution_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(attribution_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(attribution_label, 280);
+    lv_label_set_long_mode(attribution_label, LV_LABEL_LONG_WRAP);
+    lv_obj_align(attribution_label, LV_ALIGN_CENTER, 0, 60);
+    
+    // Instruction text at bottom
+    lv_obj_t *instruction_label = lv_label_create(screen);
+    lv_label_set_text(instruction_label, "Tap or swipe to return");
+    lv_obj_set_style_text_color(instruction_label, lv_color_make(150, 150, 150), 0); // Gray
+    lv_obj_set_style_text_font(instruction_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(instruction_label, LV_ALIGN_BOTTOM_MID, 0, -10);
+    
+    // Add gesture and tap event to return to glucose screen
+    lv_obj_add_event_cb(screen, quote_gesture_event, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(screen, quote_gesture_event, LV_EVENT_GESTURE, NULL);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "Random quote screen displayed");
 }
 
 // Static callbacks for connection failed screen
@@ -827,11 +1193,15 @@ void display_show_about_message(display_button_callback_t back_cb)
     
     // Message
     lv_obj_t *message = lv_label_create(screen);
-    lv_label_set_text(message, "For the Supreme,\ndeveloped by Spalding.\n\nOderint dum metuant.\n\n<3");
+    char about_text[200];
+    snprintf(about_text, sizeof(about_text), 
+             "For the Supreme (Stephen Higgins),\ndeveloped with love by\nSpalding (Derek Marr).\n\nOderint dum metuant.\n\n%s", 
+             DEVICE_VERSION);
+    lv_label_set_text(message, about_text);
     lv_obj_set_style_text_color(message, lv_color_make(200, 200, 200), 0);
-    lv_obj_set_style_text_font(message, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(message, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(message, LV_ALIGN_CENTER, 0, -20);
+    lv_obj_align(message, LV_ALIGN_CENTER, 0, 0);
     
     // Back button
     lv_obj_t *back_btn = lv_btn_create(screen);
