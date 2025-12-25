@@ -31,8 +31,8 @@ static const char *TAG = "GLUCOSE_MONITOR";
 static bool wifi_ready = false;
 static bool setup_in_progress = false;
 static bool settings_shown = false;
-static bool ota_check_complete = false;
-static bool ota_in_progress = false;  // Prevents glucose updates during OTA
+static volatile bool ota_check_complete = false;
+static volatile bool ota_in_progress = false;  // Prevents glucose updates during OTA
 
 // LibreLink/Glucose tracking
 static bool libre_logged_in = false;
@@ -365,7 +365,7 @@ static void glucose_fetch_task(void *pvParameters) {
         if (first_fetch) {
             // Wait for OTA check to complete AND OTA to not be in progress
             while (!ota_check_complete || ota_in_progress) {
-                vTaskDelay(pdMS_TO_TICKS(100));
+                vTaskDelay(pdMS_TO_TICKS(1000));
             }
             ESP_LOGI(TAG, "OTA check complete, proceeding with glucose fetch");
         } else {
