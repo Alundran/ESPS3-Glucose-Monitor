@@ -44,9 +44,11 @@ esp_err_t global_settings_save(const global_settings_t *settings)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to commit: %s", esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Settings saved: interval=%lu min, moon_lamp=%s", 
+        ESP_LOGI(TAG, "Settings saved: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f", 
                  settings->librelink_interval_minutes,
-                 settings->moon_lamp_enabled ? "enabled" : "disabled");
+                 settings->moon_lamp_enabled ? "enabled" : "disabled",
+                 settings->glucose_low_threshold,
+                 settings->glucose_high_threshold);
     }
 
     nvs_close(handle);
@@ -62,6 +64,8 @@ esp_err_t global_settings_load(global_settings_t *settings)
     // Set defaults first
     settings->librelink_interval_minutes = DEFAULT_LIBRELINK_INTERVAL_MINUTES;
     settings->moon_lamp_enabled = DEFAULT_MOON_LAMP_ENABLED;
+    settings->glucose_low_threshold = DEFAULT_GLUCOSE_LOW_THRESHOLD;
+    settings->glucose_high_threshold = DEFAULT_GLUCOSE_HIGH_THRESHOLD;
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &handle);
@@ -93,9 +97,11 @@ esp_err_t global_settings_load(global_settings_t *settings)
         settings->librelink_interval_minutes = DEFAULT_LIBRELINK_INTERVAL_MINUTES;
     }
 
-    ESP_LOGI(TAG, "Settings loaded: interval=%lu min, moon_lamp=%s",
+    ESP_LOGI(TAG, "Settings loaded: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f",
              settings->librelink_interval_minutes,
-             settings->moon_lamp_enabled ? "enabled" : "disabled");
+             settings->moon_lamp_enabled ? "enabled" : "disabled",
+             settings->glucose_low_threshold,
+             settings->glucose_high_threshold);
 
     nvs_close(handle);
     return ESP_OK;

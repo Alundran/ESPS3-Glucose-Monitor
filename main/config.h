@@ -9,7 +9,7 @@
 // Device Information
 #define DEVICE_NAME "The Supreme's Glucose Monitor"
 #define DEVICE_NAME_SHORT "Supreme-GM"  // Used for WiFi AP SSID (no spaces)
-#define DEVICE_VERSION "1.0.9"
+#define DEVICE_VERSION "1.0.10"
 #define DEVICE_MANUFACTURER "Spalding (Derek Marr)"
 #define DEVICE_OWNER "The Supreme (Stephen Higgins)"
 
@@ -20,9 +20,9 @@
 #define WIFI_AP_SSID DEVICE_NAME_SHORT
 #define WIFI_AP_PASSWORD "CatGotYourTongue"
 
-// Glucose Thresholds (mg/dL)
-#define GLUCOSE_LOW_THRESHOLD 70
-#define GLUCOSE_HIGH_THRESHOLD 180
+// Glucose Thresholds (mmol/L)
+#define GLUCOSE_LOW_THRESHOLD 3.9
+#define GLUCOSE_HIGH_THRESHOLD 13.3
 
 // Demo Mode - uses dummy data instead of real API calls
 #define DEMO_MODE_ENABLED false

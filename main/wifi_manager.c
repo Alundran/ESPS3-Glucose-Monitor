@@ -191,6 +191,8 @@ static const char* html_settings =
 "    if(d.success){"
 "      document.getElementById('interval').value=d.interval;"
 "      document.getElementById('moon_lamp').checked=d.moon_lamp;"
+"      document.getElementById('glucose_low').value=d.glucose_low;"
+"      document.getElementById('glucose_high').value=d.glucose_high;"
 "    }"
 "  }).catch(e=>console.error('Failed to load settings:',e));"
 "}"
@@ -239,6 +241,17 @@ static const char* html_settings =
 "</label>"
 "</div>"
 "<div class='info' style='text-align:center;margin-top:5px;'>Control Moon Lamp via IR based on glucose levels</div>"
+"<h2>Glucose Thresholds</h2>"
+"<div class='form-row'>"
+"<label for='glucose_low'>Low Threshold (mmol/L)</label>"
+"<input id='glucose_low' name='glucose_low' type='number' step='0.1' min='1.0' max='20.0' value='3.9' required>"
+"<div class='info'>Glucose level below this is considered HYPO</div>"
+"</div>"
+"<div class='form-row'>"
+"<label for='glucose_high'>High Threshold (mmol/L)</label>"
+"<input id='glucose_high' name='glucose_high' type='number' step='0.1' min='5.0' max='30.0' value='13.3' required>"
+"<div class='info'>Glucose level above this is considered HIGH</div>"
+"</div>"
 "<button type='submit' style='margin-top:30px;'>Save Settings</button></form>"
 "<h2 style='text-align:center;'>Firmware Update</h2>"
 "<button id='updateBtn' class='update-btn' onclick='checkUpdate()'>Check for Updates</button>"
@@ -670,12 +683,14 @@ static esp_err_t settings_load_get_handler(httpd_req_t *req) {
     global_settings_t settings;
     esp_err_t err = global_settings_load(&settings);
     
-    char response[256];
+    char response[512];
     if (err == ESP_OK) {
         snprintf(response, sizeof(response), 
-                 "{\"success\":true,\"interval\":%lu,\"moon_lamp\":%s}",
+                 "{\"success\":true,\"interval\":%lu,\"moon_lamp\":%s,\"glucose_low\":%.1f,\"glucose_high\":%.1f}",
                  settings.librelink_interval_minutes,
-                 settings.moon_lamp_enabled ? "true" : "false");
+                 settings.moon_lamp_enabled ? "true" : "false",
+                 settings.glucose_low_threshold,
+                 settings.glucose_high_threshold);
     } else {
         snprintf(response, sizeof(response), 
                  "{\"success\":false,\"error\":\"Failed to load settings\"}");
@@ -706,6 +721,8 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     global_settings_t settings;
     settings.librelink_interval_minutes = DEFAULT_LIBRELINK_INTERVAL_MINUTES;
     settings.moon_lamp_enabled = false;  // Default to off unless checked
+    settings.glucose_low_threshold = DEFAULT_GLUCOSE_LOW_THRESHOLD;
+    settings.glucose_high_threshold = DEFAULT_GLUCOSE_HIGH_THRESHOLD;
     
     // Parse interval
     char *interval_start = strstr(buf, "interval=");
@@ -732,13 +749,53 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
         settings.moon_lamp_enabled = true;
     }
     
+    // Parse glucose_low threshold
+    char *low_start = strstr(buf, "glucose_low=");
+    if (low_start) {
+        low_start += 12;
+        char *low_end = strchr(low_start, '&');
+        if (!low_end) {
+            low_end = low_start + strlen(low_start);
+        }
+        char low_str[16] = {0};
+        int len = low_end - low_start;
+        if (len < sizeof(low_str)) {
+            strncpy(low_str, low_start, len);
+            settings.glucose_low_threshold = atof(low_str);
+            if (settings.glucose_low_threshold < 1.0f) {
+                settings.glucose_low_threshold = DEFAULT_GLUCOSE_LOW_THRESHOLD;
+            }
+        }
+    }
+    
+    // Parse glucose_high threshold
+    char *high_start = strstr(buf, "glucose_high=");
+    if (high_start) {
+        high_start += 13;
+        char *high_end = strchr(high_start, '&');
+        if (!high_end) {
+            high_end = high_start + strlen(high_start);
+        }
+        char high_str[16] = {0};
+        int len = high_end - high_start;
+        if (len < sizeof(high_str)) {
+            strncpy(high_str, high_start, len);
+            settings.glucose_high_threshold = atof(high_str);
+            if (settings.glucose_high_threshold < 5.0f) {
+                settings.glucose_high_threshold = DEFAULT_GLUCOSE_HIGH_THRESHOLD;
+            }
+        }
+    }
+    
     // Save settings
     esp_err_t err = global_settings_save(&settings);
     
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Global settings saved: interval=%lu min, moon_lamp=%s", 
+        ESP_LOGI(TAG, "Global settings saved: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f", 
                  settings.librelink_interval_minutes,
-                 settings.moon_lamp_enabled ? "enabled" : "disabled");
+                 settings.moon_lamp_enabled ? "enabled" : "disabled",
+                 settings.glucose_low_threshold,
+                 settings.glucose_high_threshold);
         httpd_resp_send(req, success_page, strlen(success_page));
     } else {
         const char* error_page = "<html><body><h1>Error saving settings</h1></body></html>";

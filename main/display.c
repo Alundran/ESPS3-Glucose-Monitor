@@ -1,5 +1,6 @@
 #include "display.h"
 #include "config.h"
+#include "global_settings.h"
 #include "wifi_manager.h"
 #include "ir_transmitter.h"
 #include "esp_log.h"
@@ -651,8 +652,11 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     last_glucose_mmol = glucose_mmol;
     strncpy(last_trend, trend, sizeof(last_trend) - 1);
     last_trend[sizeof(last_trend) - 1] = '\0';
-    last_is_low = is_low;
-    last_is_high = is_high;
+    // Calculate based on threshold from global settings
+    global_settings_t settings;
+    global_settings_load(&settings);
+    last_is_low = glucose_mmol < settings.glucose_low_threshold;
+    last_is_high = glucose_mmol > settings.glucose_high_threshold;
     strncpy(last_timestamp, timestamp ? timestamp : "Unknown", sizeof(last_timestamp) - 1);
     last_timestamp[sizeof(last_timestamp) - 1] = '\0';
     last_measurement_color = measurement_color;
@@ -701,15 +705,15 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     lv_obj_t *trend_label = lv_label_create(screen);
     const char *trend_symbol;
     
-    // Map trend string to LVGL symbols
+    // Map trend string to LVGL symbols - stack double arrows vertically
     if (strcmp(trend, "↑↑") == 0 || strcmp(trend, "^^") == 0) {
-        trend_symbol = LV_SYMBOL_UP LV_SYMBOL_UP;  // Double up
+        trend_symbol = LV_SYMBOL_UP "\n" LV_SYMBOL_UP;  // Stack vertically
     } else if (strcmp(trend, "↑") == 0 || strcmp(trend, "^") == 0) {
         trend_symbol = LV_SYMBOL_UP;
     } else if (strcmp(trend, "↓") == 0 || strcmp(trend, "v") == 0) {
         trend_symbol = LV_SYMBOL_DOWN;
     } else if (strcmp(trend, "↓↓") == 0 || strcmp(trend, "vv") == 0) {
-        trend_symbol = LV_SYMBOL_DOWN LV_SYMBOL_DOWN;  // Double down
+        trend_symbol = LV_SYMBOL_DOWN "\n" LV_SYMBOL_DOWN;  // Stack vertically
     } else {
         // Default to stable/right arrow for unknown, stable, or no data (*, →, -, ?)
         trend_symbol = LV_SYMBOL_RIGHT;
@@ -723,15 +727,20 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     // Position to the left of glucose number
     lv_obj_align_to(trend_label, glucose_label, LV_ALIGN_OUT_LEFT_MID, -20, 0);
     
-    // Status text at bottom
+    // Status text at bottom - calculate based on actual glucose value
     lv_obj_t *status_label = lv_label_create(screen);
     const char *status_text;
-    if (is_low && is_high) {
+    
+    // Reuse settings already loaded at function start
+    bool calculated_low = glucose_mmol < settings.glucose_low_threshold;
+    bool calculated_high = glucose_mmol > settings.glucose_high_threshold;
+    
+    if (calculated_low && calculated_high) {
         status_text = "CRITICAL ERROR";
-    } else if (is_low) {
-        status_text = "LOW";
-    } else if (is_high) {
-        status_text = "HIGH";
+    } else if (calculated_low) {
+        status_text = "HYPO";
+    } else if (calculated_high) {
+        status_text = "HIGH GLUCOSE";
     } else {
         status_text = "NORMAL";
     }

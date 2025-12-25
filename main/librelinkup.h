@@ -21,11 +21,11 @@
 // Trend arrows
 typedef enum {
     LIBRE_TREND_NONE = 0,
-    LIBRE_TREND_RISING_QUICKLY = 1,
-    LIBRE_TREND_RISING = 2,
+    LIBRE_TREND_FALLING_QUICKLY = 1,
+    LIBRE_TREND_FALLING = 2,
     LIBRE_TREND_STABLE = 3,
-    LIBRE_TREND_FALLING = 4,
-    LIBRE_TREND_FALLING_QUICKLY = 5
+    LIBRE_TREND_RISING = 4,
+    LIBRE_TREND_RISING_QUICKLY = 5
 } libre_trend_t;
 
 // Glucose measurement data

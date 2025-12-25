@@ -13,6 +13,8 @@
 // Default values
 #define DEFAULT_LIBRELINK_INTERVAL_MINUTES 2
 #define DEFAULT_MOON_LAMP_ENABLED true
+#define DEFAULT_GLUCOSE_LOW_THRESHOLD 3.9
+#define DEFAULT_GLUCOSE_HIGH_THRESHOLD 13.3
 
 /**
  * Global settings structure
@@ -20,6 +22,8 @@
 typedef struct {
     uint32_t librelink_interval_minutes;  // Update interval in minutes (min 1)
     bool moon_lamp_enabled;               // Enable/disable Moon Lamp IR control
+    float glucose_low_threshold;          // Low glucose threshold in mmol/L
+    float glucose_high_threshold;         // High glucose threshold in mmol/L
 } global_settings_t;
 
 /**
