@@ -337,8 +337,8 @@ static void check_for_ota_update(void) {
         ESP_LOGI(TAG, "OTA update available: %s -> %s", ota_get_current_version(), new_ota_version);
         // Show warning dialog to user
         ota_in_progress = true;  // Block glucose updates
+        ota_check_complete = true;  // Check is complete, but wait for user decision
         display_show_ota_warning(on_ota_proceed, on_ota_cancel);
-        // Don't set ota_check_complete - wait for user decision
     } else if (ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "Already running latest firmware version");
         // Signal that OTA check is complete so glucose fetch can proceed
@@ -363,8 +363,8 @@ static void glucose_fetch_task(void *pvParameters) {
     while (1) {
         // On first iteration, wait for OTA check to complete, then fetch immediately
         if (first_fetch) {
-            // Wait for OTA check to complete before first glucose fetch
-            while (!ota_check_complete) {
+            // Wait for OTA check to complete AND OTA to not be in progress
+            while (!ota_check_complete || ota_in_progress) {
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
             ESP_LOGI(TAG, "OTA check complete, proceeding with glucose fetch");
