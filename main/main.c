@@ -286,6 +286,7 @@ static void on_ota_proceed(void) {
 static void on_ota_cancel(void) {
     ESP_LOGI(TAG, "User cancelled OTA update");
     ota_in_progress = false;  // Allow glucose updates again
+    ota_check_complete = true;  // Signal glucose fetch can proceed
     // Return to glucose display or appropriate screen
     if (DEMO_MODE_ENABLED) {
         display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
@@ -337,14 +338,16 @@ static void check_for_ota_update(void) {
         // Show warning dialog to user
         ota_in_progress = true;  // Block glucose updates
         display_show_ota_warning(on_ota_proceed, on_ota_cancel);
+        // Don't set ota_check_complete - wait for user decision
     } else if (ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "Already running latest firmware version");
+        // Signal that OTA check is complete so glucose fetch can proceed
+        ota_check_complete = true;
     } else {
         ESP_LOGW(TAG, "Failed to check for OTA update: %s", esp_err_to_name(ret));
+        // Signal that OTA check is complete so glucose fetch can proceed
+        ota_check_complete = true;
     }
-    
-    // Signal that OTA check is complete so glucose fetch can proceed
-    ota_check_complete = true;
 }
 
 // Task to periodically fetch glucose data from LibreLinkUp
