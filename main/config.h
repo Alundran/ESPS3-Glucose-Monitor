@@ -9,7 +9,7 @@
 // Device Information
 #define DEVICE_NAME "The Supreme's Glucose Monitor"
 #define DEVICE_NAME_SHORT "Supreme-GM"  // Used for WiFi AP SSID (no spaces)
-#define DEVICE_VERSION "1.0.9"
+#define DEVICE_VERSION "1.0.10"
 #define DEVICE_MANUFACTURER "Spalding (Derek Marr)"
 #define DEVICE_OWNER "The Supreme (Stephen Higgins)"
 
