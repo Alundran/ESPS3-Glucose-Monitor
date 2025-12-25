@@ -32,6 +32,7 @@ static bool wifi_ready = false;
 static bool setup_in_progress = false;
 static bool settings_shown = false;
 static bool ota_check_complete = false;
+static bool ota_in_progress = false;  // Prevents glucose updates during OTA
 
 // LibreLink/Glucose tracking
 static bool libre_logged_in = false;
@@ -284,6 +285,7 @@ static void on_ota_proceed(void) {
 
 static void on_ota_cancel(void) {
     ESP_LOGI(TAG, "User cancelled OTA update");
+    ota_in_progress = false;  // Allow glucose updates again
     // Return to glucose display or appropriate screen
     if (DEMO_MODE_ENABLED) {
         display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
@@ -333,6 +335,7 @@ static void check_for_ota_update(void) {
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "OTA update available: %s -> %s", ota_get_current_version(), new_ota_version);
         // Show warning dialog to user
+        ota_in_progress = true;  // Block glucose updates
         display_show_ota_warning(on_ota_proceed, on_ota_cancel);
     } else if (ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "Already running latest firmware version");
@@ -369,6 +372,12 @@ static void glucose_fetch_task(void *pvParameters) {
             vTaskDelay(pdMS_TO_TICKS(interval_ms));
         }
         first_fetch = false;
+        
+        // Skip glucose updates if OTA is in progress
+        if (ota_in_progress) {
+            ESP_LOGI(TAG, "Skipping glucose update - OTA in progress");
+            continue;
+        }
         
         // Only fetch if WiFi is connected and (credentials exist OR demo mode)
         if (!wifi_ready || (!libre_credentials_exist() && !DEMO_MODE_ENABLED)) {
