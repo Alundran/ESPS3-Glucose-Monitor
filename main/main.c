@@ -7,9 +7,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_sntp.h"
 #include "nvs_flash.h"
 #include "config.h"
 #include "display.h"
@@ -46,6 +49,51 @@ static void on_ota_proceed(void);
 static void on_ota_cancel(void);
 static void ota_progress_callback(int progress_percent, const char *message);
 static void check_for_ota_update(void);
+static bool is_glucose_data_stale(const char *timestamp);
+
+// Check if glucose timestamp is older than 5 minutes
+static bool is_glucose_data_stale(const char *timestamp) {
+    if (!timestamp || strcmp(timestamp, "Unknown") == 0) {
+        ESP_LOGW(TAG, "Timestamp is unknown or NULL");
+        return true;
+    }
+    
+    // Check if system time is valid (after year 2020)
+    time_t current_time = time(NULL);
+    struct tm *current_tm = localtime(&current_time);
+    if (current_tm->tm_year < 120) {  // 120 = 2020
+        ESP_LOGW(TAG, "System time not synced yet (year: %d), cannot check staleness", current_tm->tm_year + 1900);
+        return false;  // Don't show stale warning if we can't check
+    }
+    
+    // Parse timestamp format: "dd/mm/yyyy HH:MM:SS"
+    struct tm glucose_time = {0};
+    int day, month, year, hour, minute, second;
+    
+    if (sscanf(timestamp, "%d/%d/%d %d:%d:%d", &day, &month, &year, &hour, &minute, &second) == 6) {
+        glucose_time.tm_mday = day;
+        glucose_time.tm_mon = month - 1;  // months are 0-11
+        glucose_time.tm_year = year - 1900;  // years since 1900
+        glucose_time.tm_hour = hour;
+        glucose_time.tm_min = minute;
+        glucose_time.tm_sec = second;
+        glucose_time.tm_isdst = -1;  // Let mktime determine DST
+        
+        time_t glucose_timestamp = mktime(&glucose_time);
+        
+        double age_seconds = difftime(current_time, glucose_timestamp);
+        ESP_LOGI(TAG, "Glucose data age: %.0f seconds (%.1f minutes)", age_seconds, age_seconds / 60.0);
+        
+        // Check if more than 5 minutes old (300 seconds)
+        if (age_seconds > 300) {
+            return true;
+        }
+        return false;
+    }
+    
+    // If we couldn't parse, consider it stale
+    return true;
+}
 
 // Callbacks for WiFi events
 static void on_wifi_connected(void) {
@@ -54,6 +102,16 @@ static void on_wifi_connected(void) {
     const char *ip = wifi_manager_get_ip();
     ESP_LOGI(TAG, "WiFi Connected - SSID: %s, IP: %s", ssid, ip);
     
+    // Initialize SNTP for time synchronization
+    ESP_LOGI(TAG, "Initializing SNTP");
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+    
+    // Set timezone to UTC (or adjust based on your needs)
+    setenv("TZ", "UTC0", 1);
+    tzset();
+    
     if (setup_in_progress) {
         // User is on setup screen - show Next button
         display_setup_wifi_connected();
@@ -61,7 +119,7 @@ static void on_wifi_connected(void) {
         // Check if LibreLink credentials exist OR demo mode is enabled
         if (DEMO_MODE_ENABLED) {
             // Demo mode - show demo glucose reading
-            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH, "Demo Mode");
+            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH, "Demo Mode", 1);
         } else if (libre_credentials_exist()) {
             // Real credentials - show loading message while fetching
             display_show_wifi_status("Loading glucose data...");
@@ -128,7 +186,7 @@ static void on_setup_next_button(void) {
         vTaskDelay(pdMS_TO_TICKS(2000));
         if (DEMO_MODE_ENABLED) {
             // Demo mode - show demo glucose
-            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH, "Demo Mode");
+            display_show_glucose(DEMO_GLUCOSE_MMOL, DEMO_TREND, DEMO_GLUCOSE_LOW, DEMO_GLUCOSE_HIGH, "Demo Mode", 1);
         } else if (libre_credentials_exist()) {
             // Real credentials - show loading message
             display_show_wifi_status("Loading glucose data...");
@@ -161,14 +219,14 @@ static void red_button_handler(void *arg, void *data) {
             display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
                                librelinkup_get_trend_string(current_glucose.trend), 
                                current_glucose.is_low, current_glucose.is_high,
-                               current_glucose.timestamp);
+                               current_glucose.timestamp, current_glucose.measurement_color);
         } else if (libre_credentials_exist()) {
             // Real credentials - show current glucose if we have it, otherwise loading
             if (current_glucose.value_mmol > 0) {
                 display_show_glucose(current_glucose.value_mmol, 
                                    librelinkup_get_trend_string(current_glucose.trend), 
                                    current_glucose.is_low, current_glucose.is_high,
-                                   current_glucose.timestamp);
+                                   current_glucose.timestamp, current_glucose.measurement_color);
             } else {
                 display_show_wifi_status("Loading glucose data...");
             }
@@ -213,13 +271,13 @@ static void on_ota_cancel(void) {
         display_show_glucose(current_glucose.value_mmol > 0 ? current_glucose.value_mmol : 6.7, 
                            librelinkup_get_trend_string(current_glucose.trend), 
                            current_glucose.is_low, current_glucose.is_high,
-                           current_glucose.timestamp);
+                           current_glucose.timestamp, current_glucose.measurement_color);
     } else if (libre_credentials_exist()) {
         if (current_glucose.value_mmol > 0) {
             display_show_glucose(current_glucose.value_mmol, 
                                librelinkup_get_trend_string(current_glucose.trend), 
                                current_glucose.is_low, current_glucose.is_high,
-                               current_glucose.timestamp);
+                               current_glucose.timestamp, current_glucose.measurement_color);
         } else {
             display_show_wifi_status("Loading glucose data...");
         }
@@ -351,10 +409,16 @@ static void glucose_fetch_task(void *pvParameters) {
                 
                 // Update display if not in settings
                 if (!settings_shown && !setup_in_progress) {
-                    display_show_glucose(current_glucose.value_mmol, 
-                                       librelinkup_get_trend_string(current_glucose.trend),
-                                       current_glucose.is_low, current_glucose.is_high,
-                                       current_glucose.timestamp);
+                    // Check if data is stale (older than 5 minutes)
+                    if (is_glucose_data_stale(current_glucose.timestamp)) {
+                        ESP_LOGW(TAG, "Glucose data is stale (older than 5 minutes): %s", current_glucose.timestamp);
+                        display_show_no_recent_data();
+                    } else {
+                        display_show_glucose(current_glucose.value_mmol, 
+                                           librelinkup_get_trend_string(current_glucose.trend),
+                                           current_glucose.is_low, current_glucose.is_high,
+                                           current_glucose.timestamp, current_glucose.measurement_color);
+                    }
                 }
             } else if (err == ESP_ERR_LIBRE_AUTH_FAILED) {
                 // Only force re-login on actual authentication failures (401)

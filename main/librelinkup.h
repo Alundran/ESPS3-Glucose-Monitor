@@ -36,6 +36,8 @@ typedef struct {
     bool is_high;            // High glucose flag
     bool is_low;             // Low glucose flag
     char timestamp[32];      // Timestamp string
+    int measurement_color;   // Measurement color (1=normal, 2=high, 0=low)
+    int type;                // Measurement type
 } libre_glucose_data_t;
 
 /**

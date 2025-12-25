@@ -572,17 +572,6 @@ esp_err_t librelinkup_get_glucose(const char *patient_id, libre_glucose_data_t *
         int status_code = esp_http_client_get_status_code(client);
         ESP_LOGI(TAG, "HTTP Status: %d, Response length: %d", status_code, http_response_len);
         
-        // Log first 500 chars of response for debugging
-        if (http_response_len > 0) {
-            char preview[501];
-            int preview_len = http_response_len < 500 ? http_response_len : 500;
-            memcpy(preview, http_response, preview_len);
-            preview[preview_len] = '\0';
-            ESP_LOGI(TAG, "Response preview: %s", preview);
-        } else {
-            ESP_LOGW(TAG, "Response is empty!");
-        }
-        
         if (status_code == 200) {
             // The /graph endpoint returns a lot of data (~11KB) which can cause cJSON to run out of memory
             // We only need the glucoseMeasurement field, so let's extract just that portion
@@ -634,6 +623,18 @@ esp_err_t librelinkup_get_glucose(const char *patient_id, libre_glucose_data_t *
                             cJSON *is_high = cJSON_GetObjectItem(glucose_measurement, "isHigh");
                             cJSON *is_low = cJSON_GetObjectItem(glucose_measurement, "isLow");
                             cJSON *timestamp = cJSON_GetObjectItem(glucose_measurement, "Timestamp");
+                            cJSON *measurement_color = cJSON_GetObjectItem(glucose_measurement, "MeasurementColor");
+                            cJSON *type = cJSON_GetObjectItem(glucose_measurement, "type");
+                            
+                            // Log all values in one line
+                            ESP_LOGI(TAG, "Glucose Data: Value=%d, Trend=%d, isHigh=%s, isLow=%s, Color=%d, Type=%d, Time=%s",
+                                value && value->type == cJSON_Number ? value->valueint : -1,
+                                trend && trend->type == cJSON_Number ? trend->valueint : -1,
+                                is_high ? (cJSON_IsTrue(is_high) ? "true" : "false") : "NULL",
+                                is_low ? (cJSON_IsTrue(is_low) ? "true" : "false") : "NULL",
+                                measurement_color && measurement_color->type == cJSON_Number ? measurement_color->valueint : -1,
+                                type && type->type == cJSON_Number ? type->valueint : -1,
+                                timestamp && timestamp->valuestring ? timestamp->valuestring : "NULL");
                             
                             if (value && trend) {
                                 glucose_data->value_mgdl = value->valueint;
@@ -641,6 +642,8 @@ esp_err_t librelinkup_get_glucose(const char *patient_id, libre_glucose_data_t *
                                 glucose_data->trend = (libre_trend_t)trend->valueint;
                                 glucose_data->is_high = is_high ? cJSON_IsTrue(is_high) : false;
                                 glucose_data->is_low = is_low ? cJSON_IsTrue(is_low) : false;
+                                glucose_data->measurement_color = measurement_color ? measurement_color->valueint : 0;
+                                glucose_data->type = type ? type->valueint : 0;
                                 
                                 if (timestamp && timestamp->valuestring) {
                                     // Parse timestamp format: "5/21/2022 3:38:50 PM" and convert to dd/mm/yyyy HH:MM:SS

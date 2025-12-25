@@ -45,6 +45,7 @@ static char last_trend[8] = "*";
 static bool last_is_low = false;
 static bool last_is_high = false;
 static char last_timestamp[32] = "Unknown";
+static int last_measurement_color = 1;
 
 esp_err_t display_init(void)
 {
@@ -99,7 +100,7 @@ static void surprise_screen_tap_event(lv_event_t *e)
 {
     ESP_LOGI(TAG, "Surprise screen dismissed");
     // Restore the last glucose screen
-    display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high, last_timestamp);
+    display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high, last_timestamp, last_measurement_color);
 }
 
 // Hidden surprise screen
@@ -263,39 +264,28 @@ void display_show_splash(void)
         size_t wav_size = ahs_lala_wav_end - ahs_lala_wav_start;
         ESP_LOGI(TAG, "WAV file size: %d bytes", wav_size);
         
-        // Parse WAV header to get sample rate
-        // WAV header structure: bytes 24-27 = sample rate
-        uint32_t sample_rate = 22050; // Default
-        if (wav_size >= 28) {
-            sample_rate = ahs_lala_wav_start[24] | 
-                         (ahs_lala_wav_start[25] << 8) | 
-                         (ahs_lala_wav_start[26] << 16) | 
-                         (ahs_lala_wav_start[27] << 24);
-            ESP_LOGI(TAG, "WAV sample rate: %lu Hz", sample_rate);
+        // Parse WAV header: sample rate (offset 24-27), channels (offset 22-23)
+        if (wav_size > 44) {
+            uint16_t channels = *((uint16_t*)(ahs_lala_wav_start + 22));
+            uint32_t sample_rate = *((uint32_t*)(ahs_lala_wav_start + 24));
+            ESP_LOGI(TAG, "WAV: %lu Hz, %d channel(s)", sample_rate, channels);
+            
+            esp_codec_dev_sample_info_t fs = {
+                .sample_rate = sample_rate,
+                .channel = channels,
+                .bits_per_sample = 16,
+            };
+            
+            esp_codec_dev_close(spk_codec_dev);
+            esp_codec_dev_open(spk_codec_dev, &fs);
+            esp_codec_dev_set_out_vol(spk_codec_dev, 75);
+            
+            const uint8_t *pcm_data = ahs_lala_wav_start + 44;
+            size_t pcm_size = wav_size - 44;
+            
+            int bytes_written = esp_codec_dev_write(spk_codec_dev, (void*)pcm_data, pcm_size);
+            ESP_LOGI(TAG, "Wrote %d bytes of PCM data", bytes_written);
         }
-        
-        // Open the codec device with proper sample rate
-        esp_codec_dev_sample_info_t fs = {
-            .sample_rate = sample_rate,
-            .channel = 1,  // Mono
-            .bits_per_sample = 16
-        };
-        esp_codec_dev_open(spk_codec_dev, &fs);
-        
-        // Skip WAV header (typically 44 bytes) and play PCM data
-        const uint8_t *pcm_data = ahs_lala_wav_start + 44;
-        size_t pcm_size = wav_size - 44;
-        
-        ESP_LOGI(TAG, "Writing %d bytes of PCM data...", pcm_size);
-        int bytes_written = esp_codec_dev_write(spk_codec_dev, (void *)pcm_data, pcm_size);
-        
-        ESP_LOGI(TAG, "Audio playback complete (%d bytes written)", bytes_written);
-        
-        // Small delay to ensure audio finishes playing
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        // Close codec
-        esp_codec_dev_close(spk_codec_dev);
     }
 }
 
@@ -492,7 +482,7 @@ static void glucose_screen_tap_event(lv_event_t *e)
     }
 }
 
-void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high, const char *timestamp)
+void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high, const char *timestamp, int measurement_color)
 {
     // Store values for restoring after surprise screen
     last_glucose_mmol = glucose_mmol;
@@ -502,7 +492,7 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     last_is_high = is_high;
     strncpy(last_timestamp, timestamp ? timestamp : "Unknown", sizeof(last_timestamp) - 1);
     last_timestamp[sizeof(last_timestamp) - 1] = '\0';
-    last_is_high = is_high;
+    last_measurement_color = measurement_color;
     
     display_lock();
     
@@ -519,19 +509,16 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     lv_obj_t *screen = lv_obj_create(NULL);
     glucose_screen = screen;
     
-    // Set background color based on glucose level
-    if (is_low && is_high) {
-        // Critical - both high and low flags (error state) - flash red
+    // Set background color based on measurement_color from LibreLink
+    if (measurement_color == 3) {
+        // Hypo (red)
         lv_obj_set_style_bg_color(screen, lv_color_make(255, 0, 0), 0);
-        flash_timer = lv_timer_create(flash_timer_cb, 500, NULL); // Flash every 500ms
-    } else if (is_low) {
-        // Low glucose - red background
-        lv_obj_set_style_bg_color(screen, lv_color_make(255, 0, 0), 0);
-    } else if (is_high) {
-        // High glucose - yellow background
-        lv_obj_set_style_bg_color(screen, lv_color_make(200, 150, 0), 0);
+        flash_timer = lv_timer_create(flash_timer_cb, 500, NULL); // Flash every 500ms for hypo
+    } else if (measurement_color == 2) {
+        // Warning/High (amber)
+        lv_obj_set_style_bg_color(screen, lv_color_make(255, 165, 0), 0);
     } else {
-        // Normal range - green background
+        // Normal (green) - measurement_color == 1 or default
         lv_obj_set_style_bg_color(screen, lv_color_make(0, 150, 0), 0);
     }
     
@@ -615,6 +602,42 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     
     ESP_LOGI(TAG, "Glucose screen displayed: %.1f mmol/L %s (Low: %d, High: %d)", 
              glucose_mmol, trend, is_low, is_high);
+}
+
+void display_show_no_recent_data(void)
+{
+    display_lock();
+    
+    // Stop any existing flash timer
+    if (flash_timer != NULL) {
+        lv_timer_del(flash_timer);
+        flash_timer = NULL;
+    }
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    glucose_screen = screen;
+    
+    // Orange background for warning
+    lv_obj_set_style_bg_color(screen, lv_color_make(255, 165, 0), 0);
+    
+    // Large "No recent data" message
+    lv_obj_t *message_label = lv_label_create(screen);
+    lv_label_set_text(message_label, "No recent\ndata");
+    lv_obj_set_style_text_color(message_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(message_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_align(message_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(message_label, LV_ALIGN_CENTER, 0, 0);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "No recent data screen displayed");
 }
 
 // Static callbacks for connection failed screen

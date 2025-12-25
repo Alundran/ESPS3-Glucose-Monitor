@@ -36,8 +36,14 @@ void display_show_wifi_status(const char *message);
  * @param trend Trend arrow (e.g., "↑", "→", "↓")
  * @param is_low True if glucose is low (<70)
  * @param is_high True if glucose is high (>180)
+ * @param measurement_color Color indicator (1=green/normal, 2=amber/warning, 3=red/hypo)
  */
-void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high, const char *timestamp);
+void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bool is_high, const char *timestamp, int measurement_color);
+
+/**
+ * Show "No recent data" message with orange background
+ */
+void display_show_no_recent_data(void);
 
 /**
  * Button callback function type
