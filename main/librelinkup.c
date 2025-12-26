@@ -27,6 +27,9 @@ static bool api_url_set_by_redirect = false;  // Track if URL was set by regiona
 static char http_response[HTTP_BUFFER_SIZE];
 static int http_response_len = 0;
 
+// Store graph data from last fetch
+static libre_graph_data_t cached_graph_data = {0};
+
 /**
  * HTTP event handler
  */
@@ -669,6 +672,70 @@ esp_err_t librelinkup_get_glucose(const char *patient_id, libre_glucose_data_t *
                                 ESP_LOGI(TAG, "Glucose: %d mg/dL, Trend: %d, High: %d, Low: %d",
                                          glucose_data->value_mgdl, glucose_data->trend,
                                          glucose_data->is_high, glucose_data->is_low);
+                                
+                                // Parse graphData array for historical values
+                                const char *graph_key = "\"graphData\":";
+                                char *graph_start = strstr(http_response, graph_key);
+                                if (graph_start) {
+                                    graph_start += strlen(graph_key);
+                                    // Skip whitespace and opening bracket
+                                    while (*graph_start && (*graph_start == ' ' || *graph_start == '\n' || *graph_start == '\t')) graph_start++;
+                                    if (*graph_start == '[') {
+                                        graph_start++;
+                                        cached_graph_data.count = 0;
+                                        
+                                        // Parse array items one by one
+                                        char *item_start = graph_start;
+                                        while (cached_graph_data.count < MAX_GRAPH_POINTS && *item_start) {
+                                            // Skip to next object
+                                            while (*item_start && *item_start != '{') item_start++;
+                                            if (*item_start != '{') break;
+                                            
+                                            // Find end of object
+                                            int braces = 0;
+                                            char *item_end = item_start;
+                                            bool in_str = false;
+                                            while (*item_end) {
+                                                if (*item_end == '"' && (item_end == item_start || *(item_end-1) != '\\')) in_str = !in_str;
+                                                if (!in_str) {
+                                                    if (*item_end == '{') braces++;
+                                                    else if (*item_end == '}') {
+                                                        braces--;
+                                                        if (braces == 0) break;
+                                                    }
+                                                }
+                                                item_end++;
+                                            }
+                                            
+                                            if (braces == 0 && *item_end == '}') {
+                                                item_end++;
+                                                size_t item_len = item_end - item_start;
+                                                char item_json[256];
+                                                if (item_len < sizeof(item_json)) {
+                                                    memcpy(item_json, item_start, item_len);
+                                                    item_json[item_len] = '\0';
+                                                    
+                                                    cJSON *item = cJSON_Parse(item_json);
+                                                    if (item) {
+                                                        cJSON *val = cJSON_GetObjectItem(item, "ValueInMgPerDl");
+                                                        cJSON *color = cJSON_GetObjectItem(item, "MeasurementColor");
+                                                        if (val && val->type == cJSON_Number) {
+                                                            cached_graph_data.points[cached_graph_data.count].value_mmol = val->valueint / 18.0f;
+                                                            cached_graph_data.points[cached_graph_data.count].measurement_color = 
+                                                                (color && color->type == cJSON_Number) ? color->valueint : 1;
+                                                            cached_graph_data.count++;
+                                                        }
+                                                        cJSON_Delete(item);
+                                                    }
+                                                }
+                                                item_start = item_end;
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                        ESP_LOGI(TAG, "Parsed %d graph data points", cached_graph_data.count);
+                                    }
+                                }
                             } else {
                                 ESP_LOGE(TAG, "Missing required glucose fields (value or trend)");
                             }
@@ -743,4 +810,18 @@ const char* librelinkup_get_trend_string(libre_trend_t trend)
 float librelinkup_mgdl_to_mmol(int mgdl)
 {
     return mgdl / 18.0;
+}
+
+esp_err_t librelinkup_get_graph_data(libre_graph_data_t *graph_data)
+{
+    if (!graph_data) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (cached_graph_data.count == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    memcpy(graph_data, &cached_graph_data, sizeof(libre_graph_data_t));
+    return ESP_OK;
 }

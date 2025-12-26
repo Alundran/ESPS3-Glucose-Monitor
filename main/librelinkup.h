@@ -40,6 +40,19 @@ typedef struct {
     int type;                // Measurement type
 } libre_glucose_data_t;
 
+// Single graph data point
+typedef struct {
+    float value_mmol;        // Glucose value in mmol/L
+    int measurement_color;   // Color indicator
+} libre_graph_point_t;
+
+// Graph data (last 12 hours, ~144 points at 5min intervals)
+#define MAX_GRAPH_POINTS 144
+typedef struct {
+    libre_graph_point_t points[MAX_GRAPH_POINTS];
+    int count;               // Number of valid points
+} libre_graph_data_t;
+
 /**
  * Initialize LibreLinkUp client
  * @param use_eu_server Set true to use EU server, false for global
@@ -53,6 +66,13 @@ esp_err_t librelinkup_init(bool use_eu_server);
  * @return ESP_OK on success
  */
 esp_err_t librelinkup_login(const char *email, const char *password);
+
+/**
+ * Get graph data from last glucose fetch
+ * @param graph_data Output buffer for graph data
+ * @return ESP_OK if graph data is available
+ */
+esp_err_t librelinkup_get_graph_data(libre_graph_data_t *graph_data);
 
 /**
  * Get the first patient ID from connections

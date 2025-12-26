@@ -3,6 +3,7 @@
 #include "global_settings.h"
 #include "wifi_manager.h"
 #include "ir_transmitter.h"
+#include "librelinkup.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
@@ -600,7 +601,7 @@ static void quote_gesture_event(lv_event_t *e) {
     }
 }
 
-// Gesture event handler for glucose screen (slide down to show datetime/moon, slide up for quote)
+// Gesture event handler for glucose screen (slide down to show datetime/moon, slide up for quote, left for graph)
 static void glucose_gesture_event(lv_event_t *e) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
     
@@ -610,6 +611,9 @@ static void glucose_gesture_event(lv_event_t *e) {
     } else if (dir == LV_DIR_TOP) {
         ESP_LOGI(TAG, "Slide-up gesture detected, showing random quote");
         display_show_random_quote();
+    } else if (dir == LV_DIR_LEFT) {
+        ESP_LOGI(TAG, "Slide-left gesture detected, showing graph");
+        display_show_graph();
     }
 }
 
@@ -624,7 +628,7 @@ static void datetime_gesture_event(lv_event_t *e) {
     }
 }
 
-// Tap event handler for surprise screen
+// Tap event handler for glucose screen (triple tap for surprise)
 static void glucose_screen_tap_event(lv_event_t *e)
 {
     uint32_t current_time = lv_tick_get();
@@ -1477,4 +1481,139 @@ void display_ota_warning_start_update(void)
     lv_timer_handler();
     
     ESP_LOGI(TAG, "OTA warning transitioned to updating state");
+}
+
+// Gesture event handler for graph screen (return to glucose on any gesture)
+static void graph_gesture_event(lv_event_t *e) {
+    ESP_LOGI(TAG, "Gesture detected on graph, returning to glucose screen");
+    display_show_glucose(last_glucose_mmol, last_trend, last_is_low, last_is_high, last_timestamp, last_measurement_color);
+}
+
+void display_show_graph(void)
+{
+    display_lock();
+    
+    // Stop any existing flash timer
+    if (flash_timer != NULL) {
+        lv_timer_del(flash_timer);
+        flash_timer = NULL;
+    }
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_make(20, 20, 30), 0);
+    
+    // Get graph data from LibreLink
+    libre_graph_data_t graph_data;
+    esp_err_t err = librelinkup_get_graph_data(&graph_data);
+    
+    if (err != ESP_OK || graph_data.count == 0) {
+        // No graph data available
+        lv_obj_t *label = lv_label_create(screen);
+        lv_label_set_text(label, "No graph\\ndata available");
+        lv_obj_set_style_text_color(label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(label);
+    } else {
+        // Title
+        lv_obj_t *title = lv_label_create(screen);
+        lv_label_set_text(title, "Glucose History");
+        lv_obj_set_style_text_color(title, lv_color_white(), 0);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+        
+        // Create chart
+        lv_obj_t *chart = lv_chart_create(screen);
+        lv_obj_set_size(chart, 240, 140);
+        lv_obj_align(chart, LV_ALIGN_CENTER, 10, 5);
+        lv_obj_set_style_bg_color(chart, lv_color_make(30, 30, 40), 0);
+        lv_obj_set_style_border_color(chart, lv_color_make(100, 100, 120), 0);
+        lv_obj_set_style_border_width(chart, 2, 0);
+        lv_obj_set_style_pad_all(chart, 5, 0);
+        
+        // Configure chart
+        lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+        lv_chart_set_point_count(chart, graph_data.count);
+        lv_chart_set_div_line_count(chart, 5, 10);
+        
+        // Make gridlines visible
+        lv_obj_set_style_line_color(chart, lv_color_make(60, 60, 80), LV_PART_ITEMS);
+        lv_obj_set_style_line_width(chart, 1, LV_PART_ITEMS);
+        
+        // Load thresholds for range
+        global_settings_t settings;
+        global_settings_load(&settings);
+        
+        // Set Y-axis range (with some padding)
+        float min_val = settings.glucose_low_threshold - 2.0f;
+        float max_val = settings.glucose_high_threshold + 2.0f;
+        lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, (int)(min_val * 10), (int)(max_val * 10));
+        
+        // Create data series
+        lv_chart_series_t *series = lv_chart_add_series(chart, lv_color_make(100, 200, 255), LV_CHART_AXIS_PRIMARY_Y);
+        
+        // Set data points
+        for (int i = 0; i < graph_data.count; i++) {
+            lv_chart_set_next_value(chart, series, (int)(graph_data.points[i].value_mmol * 10));
+        }
+        
+        // Y-axis labels (left side)
+        lv_obj_t *y_max = lv_label_create(screen);
+        char y_max_text[16];
+        snprintf(y_max_text, sizeof(y_max_text), "%.1f", max_val);
+        lv_label_set_text(y_max, y_max_text);
+        lv_obj_set_style_text_color(y_max, lv_color_white(), 0);
+        lv_obj_set_style_text_font(y_max, &lv_font_montserrat_14, 0);
+        lv_obj_align_to(y_max, chart, LV_ALIGN_OUT_LEFT_TOP, -5, -5);
+        
+        lv_obj_t *y_mid = lv_label_create(screen);
+        char y_mid_text[16];
+        snprintf(y_mid_text, sizeof(y_mid_text), "%.1f", (max_val + min_val) / 2);
+        lv_label_set_text(y_mid, y_mid_text);
+        lv_obj_set_style_text_color(y_mid, lv_color_white(), 0);
+        lv_obj_set_style_text_font(y_mid, &lv_font_montserrat_14, 0);
+        lv_obj_align_to(y_mid, chart, LV_ALIGN_OUT_LEFT_MID, -5, 0);
+        
+        lv_obj_t *y_min = lv_label_create(screen);
+        char y_min_text[16];
+        snprintf(y_min_text, sizeof(y_min_text), "%.1f", min_val);
+        lv_label_set_text(y_min, y_min_text);
+        lv_obj_set_style_text_color(y_min, lv_color_white(), 0);
+        lv_obj_set_style_text_font(y_min, &lv_font_montserrat_14, 0);
+        lv_obj_align_to(y_min, chart, LV_ALIGN_OUT_LEFT_BOTTOM, -5, 5);
+        
+        // X-axis label (time range)
+        lv_obj_t *x_label = lv_label_create(screen);
+        // Show time range based on data points (assuming 5 min intervals)
+        int hours = (graph_data.count * 5) / 60;
+        char x_text[32];
+        snprintf(x_text, sizeof(x_text), "Last %d hours", hours > 0 ? hours : 1);
+        lv_label_set_text(x_label, x_text);
+        lv_obj_set_style_text_color(x_label, lv_color_make(150, 150, 150), 0);
+        lv_obj_set_style_text_font(x_label, &lv_font_montserrat_14, 0);
+        lv_obj_align_to(x_label, chart, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+        lv_obj_align_to(x_label, chart, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+        
+        // Instruction at bottom
+        lv_obj_t *info = lv_label_create(screen);
+        lv_label_set_text(info, "Swipe to return");
+        lv_obj_set_style_text_color(info, lv_color_make(150, 150, 150), 0);
+        lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
+        lv_obj_align(info, LV_ALIGN_BOTTOM_MID, 0, -5);
+        
+        ESP_LOGI(TAG, "Graph displayed with %d data points", graph_data.count);
+    }
+    
+    // Add gesture handler to return to glucose screen
+    lv_obj_add_event_cb(screen, graph_gesture_event, LV_EVENT_GESTURE, NULL);
+    lv_obj_clear_flag(screen, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
 }

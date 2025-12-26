@@ -56,6 +56,11 @@ void display_show_datetime_moon(void);
 void display_show_random_quote(void);
 
 /**
+ * Show glucose history graph (activated by single tap)
+ */
+void display_show_graph(void);
+
+/**
  * Button callback function type
  */
 typedef void (*display_button_callback_t)(void);
