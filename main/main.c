@@ -275,12 +275,39 @@ static char new_ota_version[32] = {0};
 
 static void on_ota_proceed(void) {
     ESP_LOGI(TAG, "User confirmed OTA update");
-    // Transition the warning screen to "Updating..." immediately
+    
+    // Delete warning screen and show progress screen
     display_ota_warning_start_update();
-    // Give extra time for display to fully render
-    vTaskDelay(pdMS_TO_TICKS(200));
-    // Start the update (this will call ota_progress_callback with updates)
-    ota_perform_update(ota_progress_callback);
+    vTaskDelay(pdMS_TO_TICKS(500));  // Give UI time to render
+    
+    // Start the update
+    esp_err_t ret = ota_perform_update(ota_progress_callback);
+    
+    if (ret != ESP_OK) {
+        // OTA failed - show error to user
+        ESP_LOGE(TAG, "OTA update failed: %s", esp_err_to_name(ret));
+        display_show_wifi_status("Update failed!\n\nReturning to glucose...");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        
+        // Clear OTA flags and return to normal operation
+        ota_in_progress = false;
+        ota_check_complete = true;
+        
+        // Return to glucose screen
+        if (current_glucose.value_mmol > 0) {
+            if (is_glucose_data_stale(current_glucose.timestamp)) {
+                display_show_no_recent_data();
+            } else {
+                display_show_glucose(current_glucose.value_mmol, 
+                                   librelinkup_get_trend_string(current_glucose.trend),
+                                   current_glucose.is_low, current_glucose.is_high,
+                                   current_glucose.timestamp, current_glucose.measurement_color);
+            }
+        } else {
+            display_show_wifi_status("Loading glucose data...");
+        }
+    }
+    // If successful, device will reboot, so no need for else clause
 }
 
 static void on_ota_cancel(void) {

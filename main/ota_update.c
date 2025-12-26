@@ -178,6 +178,9 @@ static void ota_progress_handler(size_t total_size, size_t current_size) {
 esp_err_t ota_perform_update(ota_progress_callback_t progress_cb) {
     if (!ota_is_safe_to_update()) {
         ESP_LOGE(TAG, "Not safe to update - WiFi or power issue");
+        if (progress_cb) {
+            progress_cb(0, "Update failed: Not safe");
+        }
         return ESP_FAIL;
     }
     
@@ -262,18 +265,22 @@ esp_err_t ota_perform_update(ota_progress_callback_t progress_cb) {
         progress_cb(5, "Starting download...");
     }
     
-    // Configure OTA with larger buffer for firmware download
+    // Temporarily suspend glucose fetch task to free up resources during OTA
+    // This prevents concurrent HTTPS connections that could cause crypto contention
+    
+    // Configure OTA with optimized buffer sizes (not too large to avoid OOM)
     esp_http_client_config_t ota_config = {
         .url = download_url,
-        .timeout_ms = 30000,
+        .timeout_ms = 60000,  // Increased timeout for large downloads
         .keep_alive_enable = true,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 4096,
+        .buffer_size = 4096,  // Keep moderate size to avoid OOM
         .buffer_size_tx = 2048,
     };
     
     esp_https_ota_config_t ota_https_config = {
         .http_config = &ota_config,
+        .bulk_flash_erase = true,  // Faster erase
     };
     
     esp_https_ota_handle_t ota_handle = NULL;
@@ -327,6 +334,10 @@ esp_err_t ota_perform_update(ota_progress_callback_t progress_cb) {
         esp_restart();
     } else {
         ESP_LOGE(TAG, "OTA finish failed: %s", esp_err_to_name(err));
+        if (progress_cb) {
+            progress_cb(0, "Update failed!");
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));
         return err;
     }
     

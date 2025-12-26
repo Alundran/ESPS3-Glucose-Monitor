@@ -1339,23 +1339,29 @@ void display_show_ota_progress(int progress_percent, const char *message)
         
         lv_screen_load(screen);
         current_screen = screen;
-    }
-    
-    // Update progress
-    if (ota_bar) {
-        lv_bar_set_value(ota_bar, progress_percent, LV_ANIM_ON);
-    }
-    
-    // Update percentage text
-    if (ota_percent_label) {
-        char percent_text[8];
-        snprintf(percent_text, sizeof(percent_text), "%d%%", progress_percent);
-        lv_label_set_text(ota_percent_label, percent_text);
-    }
-    
-    // Update message
-    if (ota_message_label && message) {
-        lv_label_set_text(ota_message_label, message);
+        
+        // Force immediate refresh to show the screen
+        lv_refr_now(NULL);
+    } else {
+        // Update progress
+        if (ota_bar) {
+            lv_bar_set_value(ota_bar, progress_percent, LV_ANIM_ON);
+        }
+        
+        // Update percentage text
+        if (ota_percent_label) {
+            char percent_text[8];
+            snprintf(percent_text, sizeof(percent_text), "%d%%", progress_percent);
+            lv_label_set_text(ota_percent_label, percent_text);
+        }
+        
+        // Update message
+        if (ota_message_label && message) {
+            lv_label_set_text(ota_message_label, message);
+        }
+        
+        // Force refresh for updates too
+        lv_refr_now(NULL);
     }
     
     display_unlock();
