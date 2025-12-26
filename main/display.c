@@ -1465,22 +1465,26 @@ void display_ota_warning_start_update(void)
         ota_warning_cancel_btn = NULL;
     }
     
-    // Update warning text to "Updating..."
-    if (ota_warning_text) {
-        lv_label_set_text(ota_warning_text, "Updating...\n\nPlease wait");
+    // Clear the warning text reference
+    ota_warning_text = NULL;
+    
+    // Delete the entire warning screen
+    if (current_screen) {
+        lv_obj_del(current_screen);
+        current_screen = NULL;
     }
     
-    // Force LVGL to invalidate and refresh the display immediately
-    if (current_screen) {
-        lv_obj_invalidate(current_screen);
-    }
+    // Clear any existing progress widgets to force recreation
+    ota_bar = NULL;
+    ota_percent_label = NULL;
+    ota_message_label = NULL;
     
     display_unlock();
     
-    // Force LVGL task to process the updates NOW before returning
-    lv_timer_handler();
+    // Create the progress screen immediately
+    display_show_ota_progress(0, "Starting update...");
     
-    ESP_LOGI(TAG, "OTA warning transitioned to updating state");
+    ESP_LOGI(TAG, "OTA progress screen initialized");
 }
 
 // Gesture event handler for graph screen (return to glucose on any gesture)
