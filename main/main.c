@@ -460,11 +460,23 @@ static void glucose_fetch_task(void *pvParameters) {
                 // Only force re-login on actual authentication failures (401)
                 ESP_LOGE(TAG, "Authentication failed - forcing re-login");
                 libre_logged_in = false;
+                // Show error on display if not in settings
+                if (!settings_shown && !setup_in_progress) {
+                    display_show_wifi_status("Auth failed\nRetrying...");
+                }
             } else if (err == ESP_ERR_LIBRE_RATE_LIMITED) {
                 // Rate limited - just log and wait, don't re-login!
                 ESP_LOGW(TAG, "Rate limited - will retry on next cycle");
+                // Show error on display if not in settings
+                if (!settings_shown && !setup_in_progress) {
+                    display_show_wifi_status("Rate limited\nWaiting...");
+                }
             } else {
-                ESP_LOGE(TAG, "Failed to fetch glucose data");
+                ESP_LOGE(TAG, "Failed to fetch glucose data: %s", esp_err_to_name(err));
+                // Show error on display if not in settings
+                if (!settings_shown && !setup_in_progress) {
+                    display_show_wifi_status("Fetch failed\nRetrying...");
+                }
             }
         }
     }

@@ -729,7 +729,7 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     lv_obj_set_style_text_align(trend_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_transform_scale(trend_label, 400, 0);  // Same scale as glucose
     // Position to the left of glucose number
-    lv_obj_align_to(trend_label, glucose_label, LV_ALIGN_OUT_LEFT_MID, -20, 0);
+    lv_obj_align_to(trend_label, glucose_label, LV_ALIGN_OUT_LEFT_MID, -40, 0);
     
     // Status text at bottom - calculate based on actual glucose value
     lv_obj_t *status_label = lv_label_create(screen);

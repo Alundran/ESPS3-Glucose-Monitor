@@ -16,10 +16,14 @@
 #define DEFAULT_GLUCOSE_LOW_THRESHOLD 3.9
 #define DEFAULT_GLUCOSE_HIGH_THRESHOLD 13.3
 
+// Settings version - increment when structure changes
+#define GLOBAL_SETTINGS_VERSION 2
+
 /**
  * Global settings structure
  */
 typedef struct {
+    uint32_t version;                     // Settings version for migration
     uint32_t librelink_interval_minutes;  // Update interval in minutes (min 1)
     bool moon_lamp_enabled;               // Enable/disable Moon Lamp IR control
     float glucose_low_threshold;          // Low glucose threshold in mmol/L

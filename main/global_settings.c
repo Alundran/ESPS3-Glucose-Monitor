@@ -18,10 +18,14 @@ esp_err_t global_settings_save(const global_settings_t *settings)
     if (!settings) {
         return ESP_ERR_INVALID_ARG;
     }
+    
+    // Create a copy and ensure version is set
+    global_settings_t settings_copy = *settings;
+    settings_copy.version = GLOBAL_SETTINGS_VERSION;
 
     // Validate settings
-    if (settings->librelink_interval_minutes < 1) {
-        ESP_LOGE(TAG, "Invalid interval: %lu (must be >= 1)", settings->librelink_interval_minutes);
+    if (settings_copy.librelink_interval_minutes < 1) {
+        ESP_LOGE(TAG, "Invalid interval: %lu (must be >= 1)", settings_copy.librelink_interval_minutes);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -33,7 +37,7 @@ esp_err_t global_settings_save(const global_settings_t *settings)
     }
 
     // Save settings as blob
-    err = nvs_set_blob(handle, SETTINGS_KEY, settings, sizeof(global_settings_t));
+    err = nvs_set_blob(handle, SETTINGS_KEY, &settings_copy, sizeof(global_settings_t));
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set settings: %s", esp_err_to_name(err));
         nvs_close(handle);
@@ -62,6 +66,7 @@ esp_err_t global_settings_load(global_settings_t *settings)
     }
 
     // Set defaults first
+    settings->version = GLOBAL_SETTINGS_VERSION;
     settings->librelink_interval_minutes = DEFAULT_LIBRELINK_INTERVAL_MINUTES;
     settings->moon_lamp_enabled = DEFAULT_MOON_LAMP_ENABLED;
     settings->glucose_low_threshold = DEFAULT_GLUCOSE_LOW_THRESHOLD;
@@ -89,6 +94,16 @@ esp_err_t global_settings_load(global_settings_t *settings)
         ESP_LOGE(TAG, "Failed to get settings: %s", esp_err_to_name(err));
         nvs_close(handle);
         return err;
+    }
+    
+    // Check version - if mismatch, use defaults and save new version
+    if (settings->version != GLOBAL_SETTINGS_VERSION) {
+        ESP_LOGW(TAG, "Settings version mismatch (stored: %lu, current: %d), resetting to defaults",
+                 settings->version, GLOBAL_SETTINGS_VERSION);
+        // Keep defaults already set, just update version
+        nvs_close(handle);
+        // Save new defaults with correct version
+        return global_settings_save(settings);
     }
 
     // Validate loaded settings
