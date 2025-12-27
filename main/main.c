@@ -47,6 +47,7 @@ static void on_restart_setup_button(void);
 static void on_reset_button(void);
 static void on_about_button(void);
 static void on_about_back_button(void);
+static void on_configure_button(void);
 static void red_button_handler(void *arg, void *data);
 static void on_ota_proceed(void);
 static void on_ota_cancel(void);
@@ -104,6 +105,11 @@ static void on_wifi_connected(void) {
     const char *ssid = wifi_manager_get_ssid();
     const char *ip = wifi_manager_get_ip();
     ESP_LOGI(TAG, "WiFi Connected - SSID: %s, IP: %s", ssid, ip);
+    
+    // Wait for DNS to be fully operational (especially important after OTA reboots)
+    // This prevents "getaddrinfo() returns 202" errors
+    ESP_LOGI(TAG, "Waiting for network stack to stabilize...");
+    vTaskDelay(pdMS_TO_TICKS(2000));
     
     // Initialize SNTP for time synchronization
     ESP_LOGI(TAG, "Initializing SNTP");
@@ -246,7 +252,7 @@ static void red_button_handler(void *arg, void *data) {
     } else {
         // Show settings
         settings_shown = true;
-        display_show_settings(on_reset_button, on_about_button);
+        display_show_settings(on_reset_button, on_about_button, on_configure_button);
     }
 }
 
@@ -258,7 +264,12 @@ static void on_about_button(void) {
 
 static void on_about_back_button(void) {
     ESP_LOGI(TAG, "About back button pressed");
-    display_show_settings(on_reset_button, on_about_button);
+    display_show_settings(on_reset_button, on_about_button, on_configure_button);
+}
+
+static void on_configure_button(void) {
+    ESP_LOGI(TAG, "Configure button pressed");
+    display_show_configure_qr();
 }
 
 static void on_reset_button(void) {

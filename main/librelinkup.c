@@ -52,6 +52,48 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+/**
+ * Retry HTTP requests with exponential backoff for DNS/network failures
+ * This helps recover from transient DNS issues after OTA reboots
+ */
+static esp_err_t http_client_perform_with_retry(esp_http_client_handle_t client, int max_retries)
+{
+    esp_err_t err = ESP_FAIL;
+    int retry_delay_ms = 1000;  // Start with 1 second
+    
+    for (int retry = 0; retry < max_retries; retry++) {
+        err = esp_http_client_perform(client);
+        
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+        
+        // Only retry on connection/DNS failures, not on HTTP errors
+        if (err == ESP_ERR_HTTP_CONNECT || 
+            err == ESP_FAIL ||  // DNS lookup failures return ESP_FAIL
+            err == ESP_ERR_TIMEOUT) {
+            
+            if (retry < max_retries - 1) {
+                ESP_LOGW(TAG, "HTTP request failed (%s), retrying in %d ms (%d/%d)", 
+                         esp_err_to_name(err), retry_delay_ms, retry + 1, max_retries);
+                vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+                retry_delay_ms *= 2;  // Exponential backoff
+                
+                if (retry_delay_ms > 5000) {
+                    retry_delay_ms = 5000;  // Cap at 5 seconds
+                }
+            } else {
+                ESP_LOGE(TAG, "HTTP request failed after %d retries: %s", max_retries, esp_err_to_name(err));
+            }
+        } else {
+            // Don't retry on other types of errors
+            return err;
+        }
+    }
+    
+    return err;
+}
+
 esp_err_t librelinkup_init(bool use_eu_server)
 {
     // Try to load saved auth token and account_id from NVS first
@@ -157,8 +199,8 @@ esp_err_t librelinkup_login(const char *email, const char *password)
     
     esp_http_client_set_post_field(client, post_data, strlen(post_data));
     
-    // Perform request
-    esp_err_t err = esp_http_client_perform(client);
+    // Perform request with retry logic for DNS failures
+    esp_err_t err = http_client_perform_with_retry(client, 3);
     
     if (err == ESP_OK) {
         int status_code = esp_http_client_get_status_code(client);
@@ -349,8 +391,8 @@ esp_err_t librelinkup_get_patient_id(char *patient_id, size_t patient_id_len)
     esp_http_client_set_header(client, "version", "4.16.0");
     esp_http_client_set_header(client, "Cache-Control", "no-cache");
     
-    // Perform request
-    esp_err_t err = esp_http_client_perform(client);
+    // Perform request with retry logic for DNS failures
+    esp_err_t err = http_client_perform_with_retry(client, 3);
     
     if (err == ESP_OK) {
         int status_code = esp_http_client_get_status_code(client);
@@ -568,8 +610,8 @@ esp_err_t librelinkup_get_glucose(const char *patient_id, libre_glucose_data_t *
     esp_http_client_set_header(client, "version", "4.16.0");
     esp_http_client_set_header(client, "Cache-Control", "no-cache");
     
-    // Perform request
-    esp_err_t err = esp_http_client_perform(client);
+    // Perform request with retry logic for DNS failures
+    esp_err_t err = http_client_perform_with_retry(client, 3);
     
     if (err == ESP_OK) {
         int status_code = esp_http_client_get_status_code(client);

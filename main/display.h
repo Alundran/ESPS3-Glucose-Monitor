@@ -93,8 +93,15 @@ void display_show_connection_failed(display_button_callback_t retry_cb, display_
  * Show settings screen
  * @param reset_cb Callback for Reset button
  * @param about_cb Callback for About button
+ * @param configure_cb Callback for Configure button
  */
-void display_show_settings(display_button_callback_t reset_cb, display_button_callback_t about_cb);
+void display_show_settings(display_button_callback_t reset_cb, display_button_callback_t about_cb, display_button_callback_t configure_cb);
+
+/**
+ * Show configure QR code screen
+ * Displays a QR code pointing to the settings web interface
+ */
+void display_show_configure_qr(void);
 
 /**
  * Show about screen with message

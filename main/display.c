@@ -517,6 +517,7 @@ typedef struct {
     char quote[256];
     char character[64];
     char episode[64];
+    char show[64];
 } quote_data_t;
 
 // Get random quote from JSON file
@@ -531,32 +532,83 @@ static bool get_random_quote(quote_data_t *quote_data) {
         return false;
     }
     
-    cJSON *quotes_array = cJSON_GetObjectItem(json, "quotes");
-    if (!cJSON_IsArray(quotes_array)) {
-        ESP_LOGE(TAG, "Quotes array not found in JSON");
+    // JSON is now an array of shows
+    if (!cJSON_IsArray(json)) {
+        ESP_LOGE(TAG, "Root element is not an array");
         cJSON_Delete(json);
         return false;
     }
     
-    int quote_count = cJSON_GetArraySize(quotes_array);
-    if (quote_count == 0) {
-        ESP_LOGE(TAG, "No quotes in array");
+    int show_count = cJSON_GetArraySize(json);
+    if (show_count == 0) {
+        ESP_LOGE(TAG, "No shows in array");
         cJSON_Delete(json);
         return false;
     }
     
-    // Get random quote
-    int random_index = esp_random() % quote_count;
-    cJSON *quote_item = cJSON_GetArrayItem(quotes_array, random_index);
+    // First, count total number of quotes across all shows
+    int total_quotes = 0;
+    for (int i = 0; i < show_count; i++) {
+        cJSON *show = cJSON_GetArrayItem(json, i);
+        if (cJSON_IsObject(show)) {
+            cJSON *quotes = cJSON_GetObjectItem(show, "quotes");
+            if (cJSON_IsArray(quotes)) {
+                total_quotes += cJSON_GetArraySize(quotes);
+            }
+        }
+    }
     
-    if (!cJSON_IsObject(quote_item)) {
-        ESP_LOGE(TAG, "Quote item is not an object");
+    if (total_quotes == 0) {
+        ESP_LOGE(TAG, "No quotes found across all shows");
         cJSON_Delete(json);
         return false;
+    }
+    
+    // Pick a random quote number from all quotes
+    int random_quote_num = esp_random() % total_quotes;
+    
+    // Find which show and quote that corresponds to
+    int quote_counter = 0;
+    cJSON *selected_show = NULL;
+    cJSON *selected_quote = NULL;
+    
+    for (int i = 0; i < show_count; i++) {
+        cJSON *show = cJSON_GetArrayItem(json, i);
+        if (!cJSON_IsObject(show)) continue;
+        
+        cJSON *quotes_array = cJSON_GetObjectItem(show, "quotes");
+        if (!cJSON_IsArray(quotes_array)) continue;
+        
+        int quotes_in_show = cJSON_GetArraySize(quotes_array);
+        
+        if (random_quote_num < quote_counter + quotes_in_show) {
+            // This is the show!
+            selected_show = show;
+            int quote_index = random_quote_num - quote_counter;
+            selected_quote = cJSON_GetArrayItem(quotes_array, quote_index);
+            break;
+        }
+        
+        quote_counter += quotes_in_show;
+    }
+    
+    if (!selected_show || !selected_quote) {
+        ESP_LOGE(TAG, "Failed to select quote");
+        cJSON_Delete(json);
+        return false;
+    }
+    
+    // Get show name
+    cJSON *show_name = cJSON_GetObjectItem(selected_show, "show");
+    if (cJSON_IsString(show_name)) {
+        strncpy(quote_data->show, show_name->valuestring, sizeof(quote_data->show) - 1);
+        quote_data->show[sizeof(quote_data->show) - 1] = '\0';
+    } else {
+        strcpy(quote_data->show, "Unknown Show");
     }
     
     // Extract quote text
-    cJSON *quote_text = cJSON_GetObjectItem(quote_item, "quote");
+    cJSON *quote_text = cJSON_GetObjectItem(selected_quote, "quote");
     if (cJSON_IsString(quote_text)) {
         strncpy(quote_data->quote, quote_text->valuestring, sizeof(quote_data->quote) - 1);
         quote_data->quote[sizeof(quote_data->quote) - 1] = '\0';
@@ -566,7 +618,7 @@ static bool get_random_quote(quote_data_t *quote_data) {
     }
     
     // Extract character
-    cJSON *character = cJSON_GetObjectItem(quote_item, "character");
+    cJSON *character = cJSON_GetObjectItem(selected_quote, "character");
     if (cJSON_IsString(character)) {
         strncpy(quote_data->character, character->valuestring, sizeof(quote_data->character) - 1);
         quote_data->character[sizeof(quote_data->character) - 1] = '\0';
@@ -575,7 +627,7 @@ static bool get_random_quote(quote_data_t *quote_data) {
     }
     
     // Extract episode
-    cJSON *episode = cJSON_GetObjectItem(quote_item, "episode");
+    cJSON *episode = cJSON_GetObjectItem(selected_quote, "episode");
     if (cJSON_IsString(episode)) {
         strncpy(quote_data->episode, episode->valuestring, sizeof(quote_data->episode) - 1);
         quote_data->episode[sizeof(quote_data->episode) - 1] = '\0';
@@ -585,7 +637,8 @@ static bool get_random_quote(quote_data_t *quote_data) {
     
     cJSON_Delete(json);
     
-    ESP_LOGI(TAG, "Selected quote #%d: '%s' - %s (%s)", random_index, 
+    ESP_LOGI(TAG, "Selected quote #%d/%d from '%s': '%s' - %s (%s)", 
+             random_quote_num + 1, total_quotes, quote_data->show, 
              quote_data->quote, quote_data->character, quote_data->episode);
     
     return true;
@@ -973,6 +1026,7 @@ void display_show_random_quote(void)
         strcpy(quote_data.quote, "The power within you is stronger than you know.");
         strcpy(quote_data.character, "Unknown");
         strcpy(quote_data.episode, "Unknown");
+        strcpy(quote_data.show, "Unknown Show");
     }
     
     // Quote text
@@ -983,7 +1037,7 @@ void display_show_random_quote(void)
     lv_obj_set_style_text_align(quote_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(quote_label, 280); // Allow text wrapping
     lv_label_set_long_mode(quote_label, LV_LABEL_LONG_WRAP);
-    lv_obj_align(quote_label, LV_ALIGN_CENTER, 0, -20);
+    lv_obj_align(quote_label, LV_ALIGN_CENTER, 0, -30);
     
     // Character and episode attribution
     lv_obj_t *attribution_label = lv_label_create(screen);
@@ -996,7 +1050,15 @@ void display_show_random_quote(void)
     lv_obj_set_style_text_align(attribution_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(attribution_label, 280);
     lv_label_set_long_mode(attribution_label, LV_LABEL_LONG_WRAP);
-    lv_obj_align(attribution_label, LV_ALIGN_CENTER, 0, 60);
+    lv_obj_align(attribution_label, LV_ALIGN_CENTER, 0, 50);
+    
+    // Show name
+    lv_obj_t *show_label = lv_label_create(screen);
+    lv_label_set_text(show_label, quote_data.show);
+    lv_obj_set_style_text_color(show_label, lv_color_make(160, 140, 180), 0); // Medium purple
+    lv_obj_set_style_text_font(show_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(show_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(show_label, LV_ALIGN_CENTER, 0, 75);
     
     // Instruction text at bottom
     lv_obj_t *instruction_label = lv_label_create(screen);
@@ -1098,6 +1160,7 @@ void display_show_connection_failed(display_button_callback_t retry_cb, display_
 // Static callback for settings screen
 static display_button_callback_t reset_callback = NULL;
 static display_button_callback_t about_callback = NULL;
+static display_button_callback_t configure_callback = NULL;
 
 static void reset_button_event(lv_event_t *e) {
     if (reset_callback) {
@@ -1111,10 +1174,17 @@ static void about_button_event(lv_event_t *e) {
     }
 }
 
-void display_show_settings(display_button_callback_t reset_cb, display_button_callback_t about_cb)
+static void configure_button_event(lv_event_t *e) {
+    if (configure_callback) {
+        configure_callback();
+    }
+}
+
+void display_show_settings(display_button_callback_t reset_cb, display_button_callback_t about_cb, display_button_callback_t configure_cb)
 {
     reset_callback = reset_cb;
     about_callback = about_cb;
+    configure_callback = configure_cb;
     
     display_lock();
     
@@ -1132,21 +1202,10 @@ void display_show_settings(display_button_callback_t reset_cb, display_button_ca
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
     
-    // Configuration URL text
-    lv_obj_t *config_url = lv_label_create(screen);
-    const char *ip = wifi_manager_get_ip();
-    char url_text[128];
-    snprintf(url_text, sizeof(url_text), "Go to http://%s\nto configure the settings\nof this device", ip);
-    lv_label_set_text(config_url, url_text);
-    lv_obj_set_style_text_color(config_url, lv_color_make(150, 150, 150), 0);
-    lv_obj_set_style_text_font(config_url, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(config_url, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(config_url, LV_ALIGN_CENTER, 0, -60);
-    
     // About button
     lv_obj_t *about_btn = lv_btn_create(screen);
     lv_obj_set_size(about_btn, 200, 50);
-    lv_obj_align(about_btn, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_align(about_btn, LV_ALIGN_CENTER, 0, -30);
     lv_obj_set_style_bg_color(about_btn, lv_color_make(100, 100, 255), 0);
     lv_obj_add_event_cb(about_btn, about_button_event, LV_EVENT_CLICKED, NULL);
     
@@ -1155,10 +1214,22 @@ void display_show_settings(display_button_callback_t reset_cb, display_button_ca
     lv_obj_set_style_text_font(about_label, &lv_font_montserrat_18, 0);
     lv_obj_center(about_label);
     
+    // Configure button
+    lv_obj_t *configure_btn = lv_btn_create(screen);
+    lv_obj_set_size(configure_btn, 200, 50);
+    lv_obj_align(configure_btn, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_set_style_bg_color(configure_btn, lv_color_make(76, 175, 80), 0);
+    lv_obj_add_event_cb(configure_btn, configure_button_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *configure_label = lv_label_create(configure_btn);
+    lv_label_set_text(configure_label, "Configure");
+    lv_obj_set_style_text_font(configure_label, &lv_font_montserrat_18, 0);
+    lv_obj_center(configure_label);
+    
     // Reset button
     lv_obj_t *reset_btn = lv_btn_create(screen);
     lv_obj_set_size(reset_btn, 200, 50);
-    lv_obj_align(reset_btn, LV_ALIGN_CENTER, 0, 70);
+    lv_obj_align(reset_btn, LV_ALIGN_CENTER, 0, 90);
     lv_obj_set_style_bg_color(reset_btn, lv_color_make(255, 100, 100), 0);
     lv_obj_add_event_cb(reset_btn, reset_button_event, LV_EVENT_CLICKED, NULL);
     
@@ -1173,6 +1244,56 @@ void display_show_settings(display_button_callback_t reset_cb, display_button_ca
     display_unlock();
     
     ESP_LOGI(TAG, "Settings screen displayed");
+}
+
+static void configure_qr_tap_event(lv_event_t *e) {
+    // Return to settings screen when tapped
+    if (reset_callback && about_callback && configure_callback) {
+        display_show_settings(reset_callback, about_callback, configure_callback);
+    }
+}
+
+void display_show_configure_qr(void)
+{
+    display_lock();
+    
+    if (current_screen) {
+        lv_obj_del(current_screen);
+    }
+    
+    lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    
+    // Get IP address and generate URL
+    const char *ip = wifi_manager_get_ip();
+    char url[128];
+    snprintf(url, sizeof(url), "http://%s", ip);
+    
+    // Create QR code
+    lv_obj_t *qr = lv_qrcode_create(screen);
+    lv_qrcode_set_size(qr, 160);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
+    lv_qrcode_update(qr, url, strlen(url));
+    lv_obj_align(qr, LV_ALIGN_CENTER, 0, -20);
+    
+    // Instruction text
+    lv_obj_t *instruction = lv_label_create(screen);
+    lv_label_set_text(instruction, "Scan to configure");
+    lv_obj_set_style_text_color(instruction, lv_color_make(200, 200, 200), 0);
+    lv_obj_set_style_text_font(instruction, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(instruction, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(instruction, LV_ALIGN_BOTTOM_MID, 0, -20);
+    
+    // Add tap event to return to settings
+    lv_obj_add_event_cb(screen, configure_qr_tap_event, LV_EVENT_CLICKED, NULL);
+    
+    lv_screen_load(screen);
+    current_screen = screen;
+    
+    display_unlock();
+    
+    ESP_LOGI(TAG, "Configure QR code screen displayed: %s", url);
 }
 
 // Static callback for about screen

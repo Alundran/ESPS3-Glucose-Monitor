@@ -8,6 +8,8 @@
 #include "librelinkup.h"
 #include "global_settings.h"
 #include "ota_update.h"
+#include "ir_transmitter.h"
+#include "ir_remote_config.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -222,6 +224,20 @@ static const char* html_settings =
 "    }"
 "  }).catch(e=>{msg.innerText='Failed to check for updates';btn.disabled=false;btn.innerText='Check for Updates';});"
 "}"
+"function testIRCommand(){"
+"  const addr=prompt('Enter IR Address (hex, e.g., FF00):','FF00');"
+"  if(!addr) return;"
+"  const cmd=prompt('Enter Command (hex, e.g., 40 for ON, 5C for OFF, 58 for RED):','40');"
+"  if(!cmd) return;"
+"  const msg=document.getElementById('irMsg');"
+"  msg.innerText='Sending IR command...';"
+"  fetch('/ir/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'address='+addr+'&command='+cmd})"
+"    .then(r=>r.json()).then(d=>{"
+"      if(d.success)msg.innerText='Command sent successfully!';"
+"      else msg.innerText='Failed: '+(d.error||'Unknown error');"
+"      setTimeout(()=>msg.innerText='',3000);"
+"    }).catch(e=>{msg.innerText='Error sending command';setTimeout(()=>msg.innerText='',3000);});"
+"}"
 "window.onload=loadSettings;"
 "</script>"
 "</head><body><h1>Global Settings</h1>"
@@ -241,6 +257,8 @@ static const char* html_settings =
 "</label>"
 "</div>"
 "<div class='info' style='text-align:center;margin-top:5px;'>Control Moon Lamp via IR based on glucose levels</div>"
+"<button type='button' class='update-btn' style='margin-top:10px;' onclick='testIRCommand()'>Test IR Command</button>"
+"<div id='irMsg' style='color:#ff9800;min-height:20px;margin-top:5px;'></div>"
 "<h2>Glucose Thresholds</h2>"
 "<div class='form-row'>"
 "<label for='glucose_low'>Low Threshold (mmol/L)</label>"
@@ -805,6 +823,82 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// IR send command handler
+static esp_err_t ir_send_post_handler(httpd_req_t *req) {
+    char buf[128];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    
+    if (ret <= 0) {
+        const char* error_response = "{\"success\":false,\"error\":\"Failed to receive data\"}";
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, error_response, strlen(error_response));
+        return ESP_OK;
+    }
+    
+    buf[ret] = '\0';
+    ESP_LOGI(TAG, "IR command request: %s", buf);
+    
+    // Parse address and command from POST data
+    uint16_t address = IR_REMOTE_ADDRESS;  // Default
+    uint8_t command = 0;
+    bool got_command = false;
+    
+    // Parse address (format: address=FF00)
+    char *addr_str = strstr(buf, "address=");
+    if (addr_str) {
+        addr_str += 8;  // Skip "address="
+        char addr_hex[5] = {0};
+        int i = 0;
+        while (addr_str[i] && addr_str[i] != '&' && i < 4) {
+            addr_hex[i] = addr_str[i];
+            i++;
+        }
+        address = (uint16_t)strtol(addr_hex, NULL, 16);
+    }
+    
+    // Parse command (format: command=40)
+    char *cmd_str = strstr(buf, "command=");
+    if (cmd_str) {
+        cmd_str += 8;  // Skip "command="
+        char cmd_hex[3] = {0};
+        int i = 0;
+        while (cmd_str[i] && cmd_str[i] != '&' && i < 2) {
+            cmd_hex[i] = cmd_str[i];
+            i++;
+        }
+        command = (uint8_t)strtol(cmd_hex, NULL, 16);
+        got_command = true;
+    }
+    
+    if (!got_command) {
+        const char* error_response = "{\"success\":false,\"error\":\"Missing command parameter\"}";
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, error_response, strlen(error_response));
+        return ESP_OK;
+    }
+    
+    ESP_LOGI(TAG, "Sending IR command - Address: 0x%04X, Command: 0x%02X", address, command);
+    
+    // Send the IR command
+    esp_err_t err = ir_transmitter_send_command(address, command);
+    
+    httpd_resp_set_type(req, "application/json");
+    
+    if (err == ESP_OK) {
+        const char* success_response = "{\"success\":true}";
+        httpd_resp_send(req, success_response, strlen(success_response));
+        ESP_LOGI(TAG, "IR command sent successfully");
+    } else {
+        char error_response[128];
+        snprintf(error_response, sizeof(error_response), 
+                 "{\"success\":false,\"error\":\"IR send failed: %s\"}", esp_err_to_name(err));
+        httpd_resp_send(req, error_response, strlen(error_response));
+        ESP_LOGE(TAG, "Failed to send IR command: %s", esp_err_to_name(err));
+    }
+    
+    return ESP_OK;
+}
+
 // OTA check handler
 static esp_err_t ota_check_handler(httpd_req_t *req) {
     char new_version[32] = {0};
@@ -985,6 +1079,13 @@ static void start_webserver(void) {
             .handler = settings_save_post_handler
         };
         httpd_register_uri_handler(server, &settings_save);
+        
+        httpd_uri_t ir_send = {
+            .uri = "/ir/send",
+            .method = HTTP_POST,
+            .handler = ir_send_post_handler
+        };
+        httpd_register_uri_handler(server, &ir_send);
         
         // Captive portal detection URLs - serve portal page directly
         // Android
