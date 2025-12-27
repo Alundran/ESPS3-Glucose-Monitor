@@ -89,13 +89,68 @@
       }
     ]
   },
-    {
+  {
     "show": "Life",
     "quotes": [
       {
         "quote": "You know how I feel about you. I want you and only you. Like Gomez to Morticia, I'll always give you my unwavering devotion, if you'll have me.",
         "character": "Derek",
         "episode": "Feelings"
+      }
+    ]
+  },
+  {
+    "show": "The Magicians",
+    "quotes": [
+      {
+        "quote": "Did I do something brave to save my friends, or did I finally find a way to kill myself?",
+        "character": "Quentin Coldwater",
+        "episode": "A Life in the Day"
+      },
+      {
+        "quote": "Magic doesn’t come from talent. It comes from pain.",
+        "character": "Alice Quinn",
+        "episode": "Unauthorized Magic"
+      },
+      {
+        "quote": "You don’t get to be offended by facts.",
+        "character": "Margo Hanson",
+        "episode": "The World in the Walls"
+      },
+      {
+        "quote": "Grow up. You’re not special. No one is.",
+        "character": "Eliot Waugh",
+        "episode": "The Strangled Heart"
+      },
+      {
+        "quote": "Just because something is broken doesn’t mean it can’t be fixed.",
+        "character": "Julia Wicker",
+        "episode": "Have You Brought Me Little Cakes"
+      },
+      {
+        "quote": "We’re not heroes. We’re people who screw up and keep going.",
+        "character": "Eliot Waugh",
+        "episode": "Escape from the Happy Place"
+      },
+      {
+        "quote": "I choose to be alive.",
+        "character": "Quentin Coldwater",
+        "episode": "No Better to Be Safe Than Sorry"
+      },
+      {
+        "quote": "You get what you need, not what you want.",
+        "character": "Dean Fogg",
+        "episode": "Unauthorized Magic"
+      },
+      {
+        "quote": "Being human is exhausting, but it beats the alternatives.",
+        "character": "Margo Hanson",
+        "episode": "Poached Eggs"
+      },
+      {
+        "quote": "Love isn’t something you earn by suffering enough.",
+        "character": "Alice Quinn",
+        "episode": "The Girl Who Told Time"
       }
     ]
   }
