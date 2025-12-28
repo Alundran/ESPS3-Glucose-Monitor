@@ -135,4 +135,11 @@ void display_show_ota_warning(display_button_callback_t proceed_cb, display_butt
  */
 void display_ota_warning_start_update(void);
 
+/**
+ * Get audio codec handle for alarm playback
+ * Initializes codec if not already initialized
+ * @return Audio codec handle or NULL if failed
+ */
+void* display_get_audio_codec(void);
+
 #endif // DISPLAY_H

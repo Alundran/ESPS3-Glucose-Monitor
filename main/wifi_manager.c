@@ -195,6 +195,8 @@ static const char* html_settings =
 "      document.getElementById('moon_lamp').checked=d.moon_lamp;"
 "      document.getElementById('glucose_low').value=d.glucose_low;"
 "      document.getElementById('glucose_high').value=d.glucose_high;"
+"      document.getElementById('alarm_enabled').checked=d.alarm_enabled;"
+"      document.getElementById('alarm_snooze').value=d.alarm_snooze;"
 "    }"
 "  }).catch(e=>console.error('Failed to load settings:',e));"
 "}"
@@ -269,6 +271,20 @@ static const char* html_settings =
 "<label for='glucose_high'>High Threshold (mmol/L)</label>"
 "<input id='glucose_high' name='glucose_high' type='number' step='0.1' min='5.0' max='30.0' value='13.3' required>"
 "<div class='info'>Glucose level above this is considered HIGH</div>"
+"</div>"
+"<h2>Alarm Settings</h2>"
+"<div class='toggle-container'>"
+"<label for='alarm_enabled'>Enable Glucose Alarms</label>"
+"<label class='switch'>"
+"<input id='alarm_enabled' name='alarm_enabled' type='checkbox' value='1' checked>"
+"<span class='slider'></span>"
+"</label>"
+"</div>"
+"<div class='info' style='text-align:center;margin-top:5px;'>Play audio alarm when glucose thresholds are violated</div>"
+"<div class='form-row'>"
+"<label for='alarm_snooze'>Snooze Duration (minutes)</label>"
+"<input id='alarm_snooze' name='alarm_snooze' type='number' min='1' max='60' value='5' required>"
+"<div class='info'>How long to snooze alarm when mute button is pressed</div>"
 "</div>"
 "<button type='submit' style='margin-top:30px;'>Save Settings</button></form>"
 "<h2 style='text-align:center;'>Firmware Update</h2>"
@@ -704,11 +720,13 @@ static esp_err_t settings_load_get_handler(httpd_req_t *req) {
     char response[512];
     if (err == ESP_OK) {
         snprintf(response, sizeof(response), 
-                 "{\"success\":true,\"interval\":%lu,\"moon_lamp\":%s,\"glucose_low\":%.1f,\"glucose_high\":%.1f}",
+                 "{\"success\":true,\"interval\":%lu,\"moon_lamp\":%s,\"glucose_low\":%.1f,\"glucose_high\":%.1f,\"alarm_enabled\":%s,\"alarm_snooze\":%lu}",
                  settings.librelink_interval_minutes,
                  settings.moon_lamp_enabled ? "true" : "false",
                  settings.glucose_low_threshold,
-                 settings.glucose_high_threshold);
+                 settings.glucose_high_threshold,
+                 settings.alarm_enabled ? "true" : "false",
+                 settings.alarm_snooze_minutes);
     } else {
         snprintf(response, sizeof(response), 
                  "{\"success\":false,\"error\":\"Failed to load settings\"}");
@@ -741,6 +759,8 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     settings.moon_lamp_enabled = false;  // Default to off unless checked
     settings.glucose_low_threshold = DEFAULT_GLUCOSE_LOW_THRESHOLD;
     settings.glucose_high_threshold = DEFAULT_GLUCOSE_HIGH_THRESHOLD;
+    settings.alarm_enabled = false;  // Default to off unless checked
+    settings.alarm_snooze_minutes = DEFAULT_ALARM_SNOOZE_MINUTES;
     
     // Parse interval
     char *interval_start = strstr(buf, "interval=");
@@ -765,6 +785,11 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     // Parse moon lamp checkbox (only present if checked)
     if (strstr(buf, "moon_lamp=1")) {
         settings.moon_lamp_enabled = true;
+    }
+    
+    // Parse alarm enabled checkbox (only present if checked)
+    if (strstr(buf, "alarm_enabled=1")) {
+        settings.alarm_enabled = true;
     }
     
     // Parse glucose_low threshold
@@ -805,16 +830,42 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
         }
     }
     
+    // Parse alarm_snooze duration
+    char *snooze_start = strstr(buf, "alarm_snooze=");
+    if (snooze_start) {
+        snooze_start += 13;
+        char *snooze_end = strchr(snooze_start, '&');
+        if (!snooze_end) {
+            snooze_end = snooze_start + strlen(snooze_start);
+        }
+        char snooze_str[16] = {0};
+        int len = snooze_end - snooze_start;
+        if (len < sizeof(snooze_str)) {
+            strncpy(snooze_str, snooze_start, len);
+            settings.alarm_snooze_minutes = atoi(snooze_str);
+            if (settings.alarm_snooze_minutes < 1 || settings.alarm_snooze_minutes > 60) {
+                settings.alarm_snooze_minutes = DEFAULT_ALARM_SNOOZE_MINUTES;
+            }
+        }
+    }
+    
     // Save settings
     esp_err_t err = global_settings_save(&settings);
     
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Global settings saved: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f", 
+        ESP_LOGI(TAG, "Global settings saved: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f, alarm=%s, snooze=%lu min", 
                  settings.librelink_interval_minutes,
                  settings.moon_lamp_enabled ? "enabled" : "disabled",
                  settings.glucose_low_threshold,
-                 settings.glucose_high_threshold);
-        httpd_resp_send(req, success_page, strlen(success_page));
+                 settings.glucose_high_threshold,
+                 settings.alarm_enabled ? "enabled" : "disabled",
+                 settings.alarm_snooze_minutes);
+        const char* settings_success_page = 
+            "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<style>body{font-family:Arial;text-align:center;margin:50px;background:#1a1a1a;color:#fff;}h1{color:#4CAF50;}</style>"
+            "</head><body><h1>Success!</h1><p>Settings saved successfully.</p>"
+            "<p><a href='/settings' style='color:#4CAF50;'>Back to Settings</a></p></body></html>";
+        httpd_resp_send(req, settings_success_page, strlen(settings_success_page));
     } else {
         const char* error_page = "<html><body><h1>Error saving settings</h1></body></html>";
         httpd_resp_send(req, error_page, strlen(error_page));

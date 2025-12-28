@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_sntp.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "config.h"
 #include "display.h"
@@ -24,6 +25,7 @@
 #include "ota_update.h"
 #include "bsp/esp-bsp.h"
 #include "iot_button.h"
+#include "esp_codec_dev.h"
 
 static const char *TAG = "GLUCOSE_MONITOR";
 
@@ -39,6 +41,16 @@ static bool libre_logged_in = false;
 static char libre_patient_id[64] = {0};
 static libre_glucose_data_t current_glucose = {0};
 
+// Alarm state tracking (non-static so display.c can access alarm_active)
+volatile bool alarm_active = false;
+static volatile bool alarm_snoozed = false;
+static volatile int64_t alarm_snooze_until = 0;  // Timestamp in microseconds
+
+// Embedded alarm audio
+extern const uint8_t ahs_hypo_wav_start[] asm("_binary_ahs_hypo_wav_start");
+extern const uint8_t ahs_hypo_wav_end[] asm("_binary_ahs_hypo_wav_end");
+extern esp_codec_dev_handle_t display_get_audio_codec(void);  // From display.c
+
 // Forward declarations
 static void on_about_next_button(void);
 static void on_setup_next_button(void);
@@ -49,11 +61,132 @@ static void on_about_button(void);
 static void on_about_back_button(void);
 static void on_configure_button(void);
 static void red_button_handler(void *arg, void *data);
+static void mute_button_handler(void *arg, void *data);
+static void alarm_task(void *pvParameters);
 static void on_ota_proceed(void);
 static void on_ota_cancel(void);
 static void ota_progress_callback(int progress_percent, const char *message);
 static void check_for_ota_update(void);
 static bool is_glucose_data_stale(const char *timestamp);
+
+// Mute button handler - snooze alarm
+static void mute_button_handler(void *arg, void *data) {
+    ESP_LOGI(TAG, "MUTE BUTTON PRESSED");
+    
+    if (alarm_active && !alarm_snoozed) {
+        // Snooze the alarm
+        global_settings_t settings;
+        global_settings_load(&settings);
+        
+        int64_t snooze_duration_us = (int64_t)settings.alarm_snooze_minutes * 60 * 1000000;
+        alarm_snooze_until = esp_timer_get_time() + snooze_duration_us;
+        alarm_snoozed = true;
+        
+        ESP_LOGI(TAG, "Alarm snoozed for %lu minutes", settings.alarm_snooze_minutes);
+    }
+}
+
+// Alarm audio playback task
+static void alarm_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Alarm task started");
+    
+    esp_codec_dev_handle_t codec = NULL;
+    bool codec_opened = false;
+    
+    while (1) {
+        // Check if alarm should be active
+        bool should_alarm = false;
+        
+        if (alarm_active) {
+            // Check if snoozed and snooze expired
+            if (alarm_snoozed) {
+                int64_t now = esp_timer_get_time();
+                if (now >= alarm_snooze_until) {
+                    ESP_LOGI(TAG, "Snooze expired, alarm reactivating");
+                    alarm_snoozed = false;
+                    should_alarm = true;
+                }
+            } else {
+                should_alarm = true;
+            }
+        }
+        
+        if (should_alarm) {
+            // Get codec handle (only once)
+            if (codec == NULL) {
+                codec = display_get_audio_codec();
+            }
+            
+            if (codec != NULL) {
+                size_t wav_size = ahs_hypo_wav_end - ahs_hypo_wav_start;
+                
+                if (wav_size > 44) {
+                    // Open codec only once when alarm starts
+                    if (!codec_opened) {
+                        uint16_t channels = *((uint16_t*)(ahs_hypo_wav_start + 22));
+                        uint32_t sample_rate = *((uint32_t*)(ahs_hypo_wav_start + 24));
+                        
+                        esp_codec_dev_sample_info_t fs = {
+                            .sample_rate = sample_rate,
+                            .channel = channels,
+                            .bits_per_sample = 16,
+                        };
+                        
+                        esp_codec_dev_close(codec);  // Close any previous state
+                        vTaskDelay(pdMS_TO_TICKS(100));  // Let codec settle
+                        esp_codec_dev_open(codec, &fs);
+                        esp_codec_dev_set_out_vol(codec, 70);  // Lower volume to 70 to reduce distortion
+                        codec_opened = true;
+                        ESP_LOGI(TAG, "Alarm codec opened (sample_rate=%lu, channels=%d)", sample_rate, channels);
+                    }
+                    
+                    const uint8_t *pcm_data = ahs_hypo_wav_start + 44;
+                    size_t pcm_size = wav_size - 44;
+                    
+                    // Write audio in chunks to avoid buffer overflow
+                    const size_t CHUNK_SIZE = 8192;  // 8KB chunks
+                    size_t total_written = 0;
+                    size_t offset = 0;
+                    
+                    ESP_LOGI(TAG, "Playing alarm audio (%d bytes total)", pcm_size);
+                    
+                    while (offset < pcm_size && should_alarm) {
+                        size_t chunk_size = (pcm_size - offset) > CHUNK_SIZE ? CHUNK_SIZE : (pcm_size - offset);
+                        int bytes_written = esp_codec_dev_write(codec, (void*)(pcm_data + offset), chunk_size);
+                        
+                        if (bytes_written > 0) {
+                            total_written += bytes_written;
+                            offset += chunk_size;
+                        } else {
+                            offset += chunk_size;  // Skip failed chunk
+                        }
+                        
+                        // Small delay between chunks to let buffer drain
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                    }
+                    
+                    ESP_LOGI(TAG, "Alarm audio complete (%d bytes written)", total_written);
+                    
+                    // Brief pause before next loop
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        } else {
+            // Alarm stopped - close codec if it was opened
+            if (codec_opened) {
+                esp_codec_dev_close(codec);
+                codec_opened = false;
+                ESP_LOGI(TAG, "Alarm codec closed");
+            }
+            // Not alarming, wait longer
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+}
 
 // Check if glucose timestamp is older than 5 minutes
 static bool is_glucose_data_stale(const char *timestamp) {
@@ -481,6 +614,36 @@ static void glucose_fetch_task(void *pvParameters) {
                         current_glucose.value_mgdl, 
                         librelinkup_get_trend_string(current_glucose.trend));
                 
+                // Check for threshold violations and manage alarm
+                global_settings_t settings;
+                global_settings_load(&settings);
+                
+                // Calculate thresholds locally (don't trust API's isLow/isHigh flags)
+                bool is_low_calculated = current_glucose.value_mmol < settings.glucose_low_threshold;
+                bool is_high_calculated = current_glucose.value_mmol > settings.glucose_high_threshold;
+                bool threshold_violated = (is_low_calculated || is_high_calculated);
+                
+                if (threshold_violated && settings.alarm_enabled) {
+                    // Only activate alarm if not already active (don't reset snooze state on glucose refresh)
+                    if (!alarm_active) {
+                        // Start alarm
+                        ESP_LOGW(TAG, "THRESHOLD VIOLATED - Starting alarm! (Low: %d, High: %d, Value: %.1f mmol/L)",
+                                 is_low_calculated, is_high_calculated, current_glucose.value_mmol);
+                        alarm_active = true;
+                        alarm_snoozed = false;
+                    } else {
+                        ESP_LOGD(TAG, "Threshold still violated, alarm continues (active: %d, snoozed: %d)", 
+                                 alarm_active, alarm_snoozed);
+                    }
+                } else {
+                    // Glucose back in range or alarm disabled - stop alarm
+                    if (alarm_active) {
+                        ESP_LOGI(TAG, "Glucose back in range - Stopping alarm");
+                        alarm_active = false;
+                        alarm_snoozed = false;
+                    }
+                }
+                
                 // Update display if not in settings
                 if (!settings_shown && !setup_in_progress) {
                     // Check if data is stale (older than 5 minutes)
@@ -577,6 +740,17 @@ void app_main(void) {
             ESP_LOGE(TAG, "Red button not available! btn_cnt=%d, BSP_BUTTON_MAIN=%d, handle=%p", 
                      btn_cnt, BSP_BUTTON_MAIN, btn_cnt > BSP_BUTTON_MAIN ? btns[BSP_BUTTON_MAIN] : NULL);
         }
+        
+        // Register mute button callback for alarm snooze
+        if (btn_cnt > BSP_BUTTON_MUTE && btns[BSP_BUTTON_MUTE] != NULL) {
+            ESP_LOGI(TAG, "Attempting to register callback for BSP_BUTTON_MUTE (index %d, handle %p)", 
+                     BSP_BUTTON_MUTE, btns[BSP_BUTTON_MUTE]);
+            
+            esp_err_t mute_err = iot_button_register_cb(btns[BSP_BUTTON_MUTE], BUTTON_SINGLE_CLICK, mute_button_handler, NULL);
+            ESP_LOGI(TAG, "MUTE button registration: %s", esp_err_to_name(mute_err));
+        } else {
+            ESP_LOGW(TAG, "Mute button not available! btn_cnt=%d, BSP_BUTTON_MUTE=%d", btn_cnt, BSP_BUTTON_MUTE);
+        }
     }
     ESP_LOGI(TAG, "========================================");
     
@@ -606,6 +780,10 @@ void app_main(void) {
     
     // Start glucose fetch task
     xTaskCreate(glucose_fetch_task, "glucose_fetch", 8192, NULL, 4, NULL);
+    
+    // Start alarm audio task
+    xTaskCreate(alarm_task, "alarm_task", 4096, NULL, 3, NULL);
+    ESP_LOGI(TAG, "Alarm task created");
     
     // If credentials exist, wait to see if connection succeeds
     if (wifi_manager_is_provisioned()) {

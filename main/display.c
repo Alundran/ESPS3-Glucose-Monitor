@@ -32,6 +32,9 @@ extern const uint8_t ahs_lala_wav_end[] asm("_binary_ahs_lala_wav_end");
 extern const uint8_t random_quotes_json_start[] asm("_binary_random_quotes_json_start");
 extern const uint8_t random_quotes_json_end[] asm("_binary_random_quotes_json_end");
 
+// Alarm state from main.c
+extern volatile bool alarm_active;
+
 static const char *TAG = "DISPLAY";
 
 // Audio codec handle for speaker
@@ -102,6 +105,41 @@ void display_lock(void)
 void display_unlock(void)
 {
     bsp_display_unlock();
+}
+
+// Get audio codec handle - used by alarm task
+void* display_get_audio_codec(void)
+{
+    // Initialize codec if not already done
+    if (spk_codec_dev == NULL) {
+        ESP_LOGI(TAG, "Initializing audio codec for alarm...");
+        
+        // Configure speaker power GPIO (GPIO 46)
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << SPEAKER_PWR_GPIO),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        
+        esp_err_t ret = gpio_config(&io_conf);
+        if (ret == ESP_OK) {
+            gpio_set_level(SPEAKER_PWR_GPIO, 1);
+            ESP_LOGI(TAG, "Speaker amplifier powered ON");
+            vTaskDelay(pdMS_TO_TICKS(50));
+            
+            spk_codec_dev = bsp_audio_codec_speaker_init();
+            if (spk_codec_dev != NULL) {
+                ESP_LOGI(TAG, "Audio codec initialized");
+                esp_codec_dev_set_out_vol(spk_codec_dev, 80);
+            } else {
+                ESP_LOGE(TAG, "Failed to initialize audio codec");
+            }
+        }
+    }
+    
+    return spk_codec_dev;
 }
 
 // Tap event to dismiss surprise screen
@@ -458,6 +496,13 @@ static bool flash_state = false;
 // Timer callback for flashing background
 static void flash_timer_cb(lv_timer_t *timer) {
     if (glucose_screen == NULL) {
+        return;
+    }
+    
+    // Check if alarm is active - if so, don't flash (interferes with audio)
+    if (alarm_active) {
+        // Keep solid bright red when alarm is playing
+        lv_obj_set_style_bg_color(glucose_screen, lv_color_make(255, 0, 0), 0);
         return;
     }
     

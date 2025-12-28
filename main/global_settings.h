@@ -15,9 +15,11 @@
 #define DEFAULT_MOON_LAMP_ENABLED true
 #define DEFAULT_GLUCOSE_LOW_THRESHOLD 3.9
 #define DEFAULT_GLUCOSE_HIGH_THRESHOLD 13.3
+#define DEFAULT_ALARM_ENABLED true
+#define DEFAULT_ALARM_SNOOZE_MINUTES 5
 
 // Settings version - increment when structure changes
-#define GLOBAL_SETTINGS_VERSION 2
+#define GLOBAL_SETTINGS_VERSION 4
 
 /**
  * Global settings structure
@@ -28,6 +30,8 @@ typedef struct {
     bool moon_lamp_enabled;               // Enable/disable Moon Lamp IR control
     float glucose_low_threshold;          // Low glucose threshold in mmol/L
     float glucose_high_threshold;         // High glucose threshold in mmol/L
+    bool alarm_enabled;                   // Enable/disable threshold alarm
+    uint32_t alarm_snooze_minutes;        // Alarm snooze duration in minutes (1-60)
 } global_settings_t;
 
 /**
