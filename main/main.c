@@ -143,32 +143,27 @@ static void alarm_task(void *pvParameters) {
                     const uint8_t *pcm_data = ahs_hypo_wav_start + 44;
                     size_t pcm_size = wav_size - 44;
                     
-                    // Write audio in chunks to avoid buffer overflow
-                    const size_t CHUNK_SIZE = 8192;  // 8KB chunks
+                    // Write audio in chunks with small yields to prevent blocking
+                    const size_t CHUNK_SIZE = 4096;  // 4KB chunks for better responsiveness
                     size_t total_written = 0;
                     size_t offset = 0;
                     
-                    ESP_LOGI(TAG, "Playing alarm audio (%d bytes total)", pcm_size);
-                    
-                    while (offset < pcm_size && should_alarm) {
+                    while (offset < pcm_size && alarm_active && !alarm_snoozed) {
                         size_t chunk_size = (pcm_size - offset) > CHUNK_SIZE ? CHUNK_SIZE : (pcm_size - offset);
                         int bytes_written = esp_codec_dev_write(codec, (void*)(pcm_data + offset), chunk_size);
                         
                         if (bytes_written > 0) {
                             total_written += bytes_written;
-                            offset += chunk_size;
-                        } else {
-                            offset += chunk_size;  // Skip failed chunk
                         }
+                        offset += chunk_size;
                         
-                        // Small delay between chunks to let buffer drain
-                        vTaskDelay(pdMS_TO_TICKS(10));
+                        // Small yield every few chunks to let other tasks run
+                        if (offset % (CHUNK_SIZE * 4) == 0) {
+                            vTaskDelay(pdMS_TO_TICKS(1));
+                        }
                     }
                     
-                    ESP_LOGI(TAG, "Alarm audio complete (%d bytes written)", total_written);
-                    
-                    // Brief pause before next loop
-                    vTaskDelay(pdMS_TO_TICKS(500));
+                    // Loop immediately without pause for continuous playback
                 } else {
                     vTaskDelay(pdMS_TO_TICKS(100));
                 }
@@ -621,9 +616,13 @@ static void glucose_fetch_task(void *pvParameters) {
                 // Calculate thresholds locally (don't trust API's isLow/isHigh flags)
                 bool is_low_calculated = current_glucose.value_mmol < settings.glucose_low_threshold;
                 bool is_high_calculated = current_glucose.value_mmol > settings.glucose_high_threshold;
-                bool threshold_violated = (is_low_calculated || is_high_calculated);
                 
-                if (threshold_violated && settings.alarm_enabled) {
+                // Check if alarm should be triggered based on individual low/high settings
+                bool should_alarm = settings.alarm_enabled && 
+                                   ((is_low_calculated && settings.alarm_low_enabled) || 
+                                    (is_high_calculated && settings.alarm_high_enabled));
+                
+                if (should_alarm) {
                     // Only activate alarm if not already active (don't reset snooze state on glucose refresh)
                     if (!alarm_active) {
                         // Start alarm
@@ -781,8 +780,8 @@ void app_main(void) {
     // Start glucose fetch task
     xTaskCreate(glucose_fetch_task, "glucose_fetch", 8192, NULL, 4, NULL);
     
-    // Start alarm audio task
-    xTaskCreate(alarm_task, "alarm_task", 4096, NULL, 3, NULL);
+    // Start alarm audio task (higher priority for smooth audio)
+    xTaskCreate(alarm_task, "alarm_task", 4096, NULL, 6, NULL);
     ESP_LOGI(TAG, "Alarm task created");
     
     // If credentials exist, wait to see if connection succeeds

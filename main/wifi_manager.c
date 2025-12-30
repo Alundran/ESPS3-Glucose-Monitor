@@ -197,6 +197,8 @@ static const char* html_settings =
 "      document.getElementById('glucose_high').value=d.glucose_high;"
 "      document.getElementById('alarm_enabled').checked=d.alarm_enabled;"
 "      document.getElementById('alarm_snooze').value=d.alarm_snooze;"
+"      document.getElementById('alarm_low_enabled').checked=d.alarm_low_enabled;"
+"      document.getElementById('alarm_high_enabled').checked=d.alarm_high_enabled;"
 "    }"
 "  }).catch(e=>console.error('Failed to load settings:',e));"
 "}"
@@ -281,6 +283,22 @@ static const char* html_settings =
 "</label>"
 "</div>"
 "<div class='info' style='text-align:center;margin-top:5px;'>Play audio alarm when glucose thresholds are violated</div>"
+"<div class='toggle-container'>"
+"<label for='alarm_low_enabled'>Enable Low Glucose Alarm</label>"
+"<label class='switch'>"
+"<input id='alarm_low_enabled' name='alarm_low_enabled' type='checkbox' value='1' checked>"
+"<span class='slider'></span>"
+"</label>"
+"</div>"
+"<div class='info' style='text-align:center;margin-top:5px;'>Play alarm sound for HYPO (low glucose)</div>"
+"<div class='toggle-container'>"
+"<label for='alarm_high_enabled'>Enable High Glucose Alarm</label>"
+"<label class='switch'>"
+"<input id='alarm_high_enabled' name='alarm_high_enabled' type='checkbox' value='1'>"
+"<span class='slider'></span>"
+"</label>"
+"</div>"
+"<div class='info' style='text-align:center;margin-top:5px;'>Play alarm sound for high glucose</div>"
 "<div class='form-row'>"
 "<label for='alarm_snooze'>Snooze Duration (minutes)</label>"
 "<input id='alarm_snooze' name='alarm_snooze' type='number' min='1' max='60' value='5' required>"
@@ -720,13 +738,15 @@ static esp_err_t settings_load_get_handler(httpd_req_t *req) {
     char response[512];
     if (err == ESP_OK) {
         snprintf(response, sizeof(response), 
-                 "{\"success\":true,\"interval\":%lu,\"moon_lamp\":%s,\"glucose_low\":%.1f,\"glucose_high\":%.1f,\"alarm_enabled\":%s,\"alarm_snooze\":%lu}",
+                 "{\"success\":true,\"interval\":%lu,\"moon_lamp\":%s,\"glucose_low\":%.1f,\"glucose_high\":%.1f,\"alarm_enabled\":%s,\"alarm_snooze\":%lu,\"alarm_low_enabled\":%s,\"alarm_high_enabled\":%s}",
                  settings.librelink_interval_minutes,
                  settings.moon_lamp_enabled ? "true" : "false",
                  settings.glucose_low_threshold,
                  settings.glucose_high_threshold,
                  settings.alarm_enabled ? "true" : "false",
-                 settings.alarm_snooze_minutes);
+                 settings.alarm_snooze_minutes,
+                 settings.alarm_low_enabled ? "true" : "false",
+                 settings.alarm_high_enabled ? "true" : "false");
     } else {
         snprintf(response, sizeof(response), 
                  "{\"success\":false,\"error\":\"Failed to load settings\"}");
@@ -761,6 +781,8 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     settings.glucose_high_threshold = DEFAULT_GLUCOSE_HIGH_THRESHOLD;
     settings.alarm_enabled = false;  // Default to off unless checked
     settings.alarm_snooze_minutes = DEFAULT_ALARM_SNOOZE_MINUTES;
+    settings.alarm_low_enabled = false;  // Default to off unless checked
+    settings.alarm_high_enabled = false;  // Default to off unless checked
     
     // Parse interval
     char *interval_start = strstr(buf, "interval=");
@@ -790,6 +812,16 @@ static esp_err_t settings_save_post_handler(httpd_req_t *req) {
     // Parse alarm enabled checkbox (only present if checked)
     if (strstr(buf, "alarm_enabled=1")) {
         settings.alarm_enabled = true;
+    }
+    
+    // Parse alarm low enabled checkbox (only present if checked)
+    if (strstr(buf, "alarm_low_enabled=1")) {
+        settings.alarm_low_enabled = true;
+    }
+    
+    // Parse alarm high enabled checkbox (only present if checked)
+    if (strstr(buf, "alarm_high_enabled=1")) {
+        settings.alarm_high_enabled = true;
     }
     
     // Parse glucose_low threshold

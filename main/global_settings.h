@@ -17,9 +17,11 @@
 #define DEFAULT_GLUCOSE_HIGH_THRESHOLD 13.3
 #define DEFAULT_ALARM_ENABLED true
 #define DEFAULT_ALARM_SNOOZE_MINUTES 5
+#define DEFAULT_ALARM_LOW_ENABLED true
+#define DEFAULT_ALARM_HIGH_ENABLED false
 
 // Settings version - increment when structure changes
-#define GLOBAL_SETTINGS_VERSION 4
+#define GLOBAL_SETTINGS_VERSION 5
 
 /**
  * Global settings structure
@@ -32,6 +34,8 @@ typedef struct {
     float glucose_high_threshold;         // High glucose threshold in mmol/L
     bool alarm_enabled;                   // Enable/disable threshold alarm
     uint32_t alarm_snooze_minutes;        // Alarm snooze duration in minutes (1-60)
+    bool alarm_low_enabled;               // Enable/disable LOW glucose alarm
+    bool alarm_high_enabled;              // Enable/disable HIGH glucose alarm
 } global_settings_t;
 
 /**

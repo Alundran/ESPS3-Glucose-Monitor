@@ -48,13 +48,15 @@ esp_err_t global_settings_save(const global_settings_t *settings)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to commit: %s", esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Settings saved: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f, alarm=%s, snooze=%lu min", 
+        ESP_LOGI(TAG, "Settings saved: interval=%lu min, moon_lamp=%s, low=%.1f, high=%.1f, alarm=%s, snooze=%lu min, low_alarm=%s, high_alarm=%s", 
                  settings->librelink_interval_minutes,
                  settings->moon_lamp_enabled ? "enabled" : "disabled",
                  settings->glucose_low_threshold,
                  settings->glucose_high_threshold,
                  settings->alarm_enabled ? "enabled" : "disabled",
-                 settings->alarm_snooze_minutes);
+                 settings->alarm_snooze_minutes,
+                 settings->alarm_low_enabled ? "enabled" : "disabled",
+                 settings->alarm_high_enabled ? "enabled" : "disabled");
     }
 
     nvs_close(handle);
@@ -75,6 +77,8 @@ esp_err_t global_settings_load(global_settings_t *settings)
     settings->glucose_high_threshold = DEFAULT_GLUCOSE_HIGH_THRESHOLD;
     settings->alarm_enabled = DEFAULT_ALARM_ENABLED;
     settings->alarm_snooze_minutes = DEFAULT_ALARM_SNOOZE_MINUTES;
+    settings->alarm_low_enabled = DEFAULT_ALARM_LOW_ENABLED;
+    settings->alarm_high_enabled = DEFAULT_ALARM_HIGH_ENABLED;
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &handle);
