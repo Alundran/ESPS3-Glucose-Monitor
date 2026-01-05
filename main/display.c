@@ -779,7 +779,7 @@ void display_show_glucose(float glucose_mmol, const char *trend, bool is_low, bo
     glucose_screen = screen;
     
     // Set background color based on measurement_color from LibreLink
-    if (measurement_color == 3) {
+    if (measurement_color > 3) {
         // Hypo (red)
         lv_obj_set_style_bg_color(screen, lv_color_make(255, 0, 0), 0);
         flash_timer = lv_timer_create(flash_timer_cb, 500, NULL); // Flash every 500ms for hypo
